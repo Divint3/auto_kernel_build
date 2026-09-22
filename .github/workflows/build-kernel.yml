@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: true
+      minimal_config:
+        description: '快速编译模式（allnoconfig 最小配置，约 3~5 分钟；关闭 = defconfig 全量配置）'
+        required: false
+        type: boolean
+        default: true
   schedule:
     - cron: '0 18 * * 0'   # 每周日 UTC 18:00（北京时间周一凌晨 2 点）自动用最新内核构建
 
@@ -92,20 +97,68 @@ jobs:
         run: |
           KSRC=${{ steps.src.outputs.kernel_dir }}
           cd $KSRC
-          make defconfig
-          # QEMU virt 机型所需关键配置（defconfig 已含大部分，这里显式确保）
-          ./scripts/config --enable CONFIG_SERIAL_AMBA_PL011 \
-                            --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
-                            --enable CONFIG_EXT4_FS \
-                            --enable CONFIG_VIRTIO_PCI \
-                            --enable CONFIG_VIRTIO_BLK \
-                            --enable CONFIG_VIRTIO_NET \
-                            --enable CONFIG_9P_FS \
-                            --enable CONFIG_NET_9P_VIRTIO \
-                            --enable CONFIG_DEVTMPFS \
-                            --enable CONFIG_DEVTMPFS_MOUNT
-          make olddefconfig
+
+          if [ "${{ github.event.inputs.minimal_config || 'true' }}" = "true" ]; then
+            # ===== 快速编译：allnoconfig 最小配置（QEMU virt 可引导的最小符号集）=====
+            make allnoconfig
+            # 基础可运行项（allnoconfig 会把 default y 的选项全部关掉，必须逐个补回）
+            ./scripts/config \
+              --enable CONFIG_TTY \
+              --enable CONFIG_PRINTK \
+              --enable CONFIG_BINFMT_ELF \
+              --enable CONFIG_BINFMT_SCRIPT \
+              --enable CONFIG_BLK_DEV_INITRD \
+              --enable CONFIG_RD_GZIP \
+              --enable CONFIG_PROC_FS \
+              --enable CONFIG_SYSFS \
+              --enable CONFIG_DEVTMPFS \
+              --enable CONFIG_DEVTMPFS_MOUNT \
+              --enable CONFIG_SMP \
+              --enable CONFIG_MMU \
+              --enable CONFIG_MODULES \
+              --enable CONFIG_SERIAL_AMBA_PL011 \
+              --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
+              --set-str CONFIG_CMDLINE "console=ttyAMA0"
+            # ext4 根文件系统启动链（initramfs 模式也可保留，体积影响极小）
+            ./scripts/config \
+              --enable CONFIG_PCI \
+              --enable CONFIG_BLOCK \
+              --enable CONFIG_BLK_DEV \
+              --enable CONFIG_VIRTIO_PCI \
+              --enable CONFIG_VIRTIO_BLK \
+              --enable CONFIG_EXT4_FS
+            make olddefconfig
+            # 校验：olddefconfig 会静默丢弃依赖不满足的符号，必须显式回读检查
+            for sym in TTY PRINTK BINFMT_ELF BINFMT_SCRIPT BLK_DEV_INITRD RD_GZIP \
+                       PROC_FS SYSFS DEVTMPFS SERIAL_AMBA_PL011_CONSOLE MODULES \
+                       VIRTIO_PCI VIRTIO_BLK EXT4_FS; do
+              grep -q "^CONFIG_${sym}=y" .config \
+                || { echo "MISSING CONFIG_${sym} (依赖不满足或符号名有误)"; exit 1; }
+            done
+          elif [ -f $GITHUB_WORKSPACE/configs/custom_defconfig ]; then
+            # ===== 自定义 defconfig =====
+            make defconfig
+            cp $GITHUB_WORKSPACE/configs/custom_defconfig .config
+            make olddefconfig
+          else
+            # ===== 全量 defconfig =====
+            make defconfig
+            ./scripts/config --enable CONFIG_SERIAL_AMBA_PL011 \
+                              --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
+                              --enable CONFIG_EXT4_FS \
+                              --enable CONFIG_VIRTIO_PCI \
+                              --enable CONFIG_VIRTIO_BLK \
+                              --enable CONFIG_VIRTIO_NET \
+                              --enable CONFIG_9P_FS \
+                              --enable CONFIG_NET_9P_VIRTIO \
+                              --enable CONFIG_DEVTMPFS \
+                              --enable CONFIG_DEVTMPFS_MOUNT
+            make olddefconfig
+          fi
+
           make -j$(nproc) all dtbs   # all = vmlinux + Image + modules
+          # 供树外模块 M= 编译使用（minimal 配置下必须显式准备）
+          make modules_prepare
 
       # ---------- 6. 编译 BusyBox（交叉编译静态链接）----------
       - name: Build BusyBox
@@ -157,9 +210,9 @@ jobs:
           BB=${{ steps.busybox.outputs.busybox_dir }}
           IMG=$GITHUB_WORKSPACE/output/rootfs.ext4
           ROOTFS=$HOME/ext4-root
-          mkdir -p $ROOTFS/bin $ROOTFS/sbin $ROOTFS/proc $ROOTFS/sys $ROOTFS/dev \
-                   $ROOTFS/tmp $ROOTFS/root $ROOTFS/lib/modules $ROOTFS/usr/bin \
-                   $ROOTFS/usr/sbin $ROOTFS/var/log
+          mkdir -p $ROOTFS/bin $ROOTFS/sbin $ROOTFS/etc/init.d $ROOTFS/proc \
+                   $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp $ROOTFS/root \
+                   $ROOTFS/lib/modules $ROOTFS/usr/bin $ROOTFS/usr/sbin $ROOTFS/var/log
           cp $BB/busybox $ROOTFS/bin/
           for cmd in sh mount umount ls cat echo ps mkdir rm cp mv poweroff reboot sleep; do
             ln -sf /bin/busybox $ROOTFS/bin/$cmd
@@ -172,7 +225,6 @@ jobs:
           ttyAMA0::respawn:/bin/sh
           ::ctrlaltdel:/bin/reboot
           EOF
-          mkdir -p $ROOTFS/etc/init.d
           cat > $ROOTFS/etc/init.d/rcS <<'EOF'
           #!/bin/sh
           mount -a

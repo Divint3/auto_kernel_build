@@ -37,6 +37,9 @@
 | `toolchain_version` | Arm GNU 工具链版本 | `13.2.rel1` |
 | `build_module` | 是否编译树外模块示例 | true |
 | `run_qemu_test` | CI 内 QEMU 启动自测 | true |
+| `minimal_config` | 快速编译：allnoconfig 最小配置（补齐 QEMU 引导所需符号，约 3~5 分钟）；关闭 = defconfig 全量（20~40 分钟） | true |
+
+> 快速模式说明：allnoconfig 会关掉所有 `default y` 的选项，workflow 已逐项补回 TTY/PRINTK/BINFMT_ELF/BLK_DEV_INITRD/RD_GZIP/VIRTIO/EXT4 等引导必需符号，并在 `olddefconfig` 后回读 .config 校验（依赖不满足时 kconfig 会静默丢弃符号）。
 
 ## 目录结构
 
