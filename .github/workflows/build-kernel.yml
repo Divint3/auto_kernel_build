@@ -1,0 +1,272 @@
+name: Build aarch64 Kernel (QEMU bootable)
+
+# 手动触发 + 定时触发（每周检查一次最新内核）
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: '内核版本（如 6.9.2），留空 = 自动下载最新 stable 版本'
+        required: false
+        default: ''
+      toolchain_version:
+        description: 'Arm GNU 工具链版本（如 13.2.rel1）'
+        required: false
+        default: '13.2.rel1'
+      build_module:
+        description: '是否编译内核模块示例'
+        required: false
+        type: boolean
+        default: true
+      run_qemu_test:
+        description: '构建后是否在 CI 中用 QEMU 启动自测'
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    - cron: '0 18 * * 0'   # 每周日 UTC 18:00（北京时间周一凌晨 2 点）自动用最新内核构建
+
+env:
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-none-linux-gnu-
+  QEMU_MACHINE: virt
+  QEMU_CPU: cortex-a57
+  BUSYBOX_VERSION: 1.36.1
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------- 1. 解析内核版本 ----------
+      - name: Resolve kernel version
+        id: kernel
+        run: |
+          if [ -n "${{ github.event.inputs.kernel_version }}" ]; then
+            VER="${{ github.event.inputs.kernel_version }}"
+          else
+            # 从 kernel.org 官方 JSON 获取最新 stable 版本
+            VER=$(curl -s https://www.kernel.org/releases.json | jq -r '.releases[] | select(.moniker=="stable") | .version' | head -n1)
+          fi
+          echo "Using kernel version: $VER"
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+      # ---------- 2. 安装构建依赖 ----------
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev jq cpio wget curl \
+            dwarves xz-utils patchutils python3 python-is-python3 \
+            e2fsprogs qemu-system-arm
+
+      # ---------- 3. 下载指定版本工具链 ----------
+      - name: Download cross toolchain
+        run: |
+          mkdir -p $HOME/toolchain
+          VER=${{ github.event.inputs.toolchain_version || '13.2.rel1' }}
+          URL="https://developer.arm.com/-/media/Files/downloads/gnu/${VER}/binrel/arm-gnu-toolchain-${VER}-x86_64-aarch64-none-linux-gnu.tar.xz"
+          echo "Downloading toolchain: $URL"
+          wget -q --show-progress "$URL" -O /tmp/toolchain.tar.xz
+          tar -xf /tmp/toolchain.tar.xz -C $HOME/toolchain --strip-components=1
+          $HOME/toolchain/bin/${CROSS_COMPILE}gcc --version | head -n1
+          echo "$HOME/toolchain/bin" >> $GITHUB_PATH
+
+      # ---------- 4. 下载内核源码 ----------
+      - name: Download kernel source
+        id: src
+        run: |
+          VER=${{ steps.kernel.outputs.version }}
+          MAJOR=$(echo $VER | cut -d. -f1)
+          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${VER}.tar.xz"
+          echo "Downloading kernel: $URL"
+          wget -q --show-progress "$URL" -O /tmp/linux.tar.xz
+          tar -xf /tmp/linux.tar.xz -C $HOME
+          echo "kernel_dir=$HOME/linux-${VER}" >> $GITHUB_OUTPUT
+
+      # ---------- 5. 编译内核（vmlinux + Image + modules + dtbs）----------
+      - name: Build kernel
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          cd $KSRC
+          make defconfig
+          # QEMU virt 机型所需关键配置（defconfig 已含大部分，这里显式确保）
+          ./scripts/config --enable CONFIG_SERIAL_AMBA_PL011 \
+                            --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
+                            --enable CONFIG_EXT4_FS \
+                            --enable CONFIG_VIRTIO_PCI \
+                            --enable CONFIG_VIRTIO_BLK \
+                            --enable CONFIG_VIRTIO_NET \
+                            --enable CONFIG_9P_FS \
+                            --enable CONFIG_NET_9P_VIRTIO \
+                            --enable CONFIG_DEVTMPFS \
+                            --enable CONFIG_DEVTMPFS_MOUNT
+          make olddefconfig
+          make -j$(nproc) all dtbs   # all = vmlinux + Image + modules
+
+      # ---------- 6. 编译 BusyBox（交叉编译静态链接）----------
+      - name: Build BusyBox
+        id: busybox
+        run: |
+          cd $HOME
+          wget -q "https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2"
+          tar -xf busybox-${BUSYBOX_VERSION}.tar.bz2
+          cd busybox-${BUSYBOX_VERSION}
+          make defconfig
+          sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+          make -j$(nproc) CROSS_COMPILE=$HOME/toolchain/bin/${CROSS_COMPILE}
+          file busybox   # 应显示 statically linked
+          echo "busybox_dir=$HOME/busybox-${BUSYBOX_VERSION}" >> $GITHUB_OUTPUT
+
+      # ---------- 7. 制作 initramfs（快速启动验证用）----------
+      - name: Create initramfs
+        run: |
+          ROOTFS=$HOME/initramfs-root
+          mkdir -p $ROOTFS/bin $ROOTFS/proc $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp $ROOTFS/root $ROOTFS/mnt
+          BB=${{ steps.busybox.outputs.busybox_dir }}
+          cp $BB/busybox $ROOTFS/bin/
+          # 补齐 busybox 符号链接（sh、mount 等）
+          for cmd in sh mount umount ls cat echo ps mkdir rm cp mv poweroff reboot sleep; do
+            ln -sf /bin/busybox $ROOTFS/bin/$cmd
+          done
+          # init 脚本
+          cat > $ROOTFS/init <<'EOF'
+          #!/bin/sh
+          mount -t proc none /proc
+          mount -t sysfs none /sys
+          mount -t devtmpfs none /dev
+          echo "============================================"
+          echo " QEMU aarch64 initramfs boot OK!"
+          echo " $(uname -a)"
+          echo "============================================"
+          echo "QEMU-BOOT-OK"
+          exec /bin/sh
+          EOF
+          chmod +x $ROOTFS/init
+          mkdir -p $GITHUB_WORKSPACE/output
+          cd $ROOTFS
+          find . | cpio -o -H newc | gzip > $GITHUB_WORKSPACE/output/initramfs.cpio.gz
+
+      # ---------- 8. 制作 ext4 根文件系统（含内核模块）----------
+      - name: Create ext4 rootfs
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          BB=${{ steps.busybox.outputs.busybox_dir }}
+          IMG=$GITHUB_WORKSPACE/output/rootfs.ext4
+          ROOTFS=$HOME/ext4-root
+          mkdir -p $ROOTFS/bin $ROOTFS/sbin $ROOTFS/proc $ROOTFS/sys $ROOTFS/dev \
+                   $ROOTFS/tmp $ROOTFS/root $ROOTFS/lib/modules $ROOTFS/usr/bin \
+                   $ROOTFS/usr/sbin $ROOTFS/var/log
+          cp $BB/busybox $ROOTFS/bin/
+          for cmd in sh mount umount ls cat echo ps mkdir rm cp mv poweroff reboot sleep; do
+            ln -sf /bin/busybox $ROOTFS/bin/$cmd
+          done
+          # /etc/fstab 与 inittab（busybox init）
+          echo "proc  /proc  proc  defaults  0  0" > $ROOTFS/etc/fstab
+          echo "sysfs /sys   sysfs defaults  0  0" >> $ROOTFS/etc/fstab
+          cat > $ROOTFS/etc/inittab <<'EOF'
+          ::sysinit:/etc/init.d/rcS
+          ttyAMA0::respawn:/bin/sh
+          ::ctrlaltdel:/bin/reboot
+          EOF
+          mkdir -p $ROOTFS/etc/init.d
+          cat > $ROOTFS/etc/init.d/rcS <<'EOF'
+          #!/bin/sh
+          mount -a
+          mkdir -p /dev/pts
+          mount -t devpts devpts /dev/pts
+          echo "ext4 rootfs boot OK: $(uname -a)"
+          EOF
+          chmod +x $ROOTFS/etc/init.d/rcS
+          # 内核模块安装到根文件系统
+          make -C $KSRC INSTALL_MOD_PATH=$ROOTFS modules_install
+          $HOME/toolchain/bin/${CROSS_COMPILE}strip --strip-unneeded $(find $ROOTFS -name '*.ko') || true
+          # 制作 ext4 镜像（e2fsprogs >= 1.47 的 -d 直接从目录生成，无需 loop 挂载）
+          mkdir -p $GITHUB_WORKSPACE/output
+          dd if=/dev/zero of=$IMG bs=1M count=256
+          mkfs.ext4 -F -d $ROOTFS $IMG
+
+      # ---------- 9. 编译树外内核模块示例 ----------
+      - name: Build out-of-tree module
+        if: ${{ github.event.inputs.build_module != 'false' }}
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          make -C $KSRC M=$GITHUB_WORKSPACE/kernel-module modules
+          mkdir -p $GITHUB_WORKSPACE/output
+          cp $GITHUB_WORKSPACE/kernel-module/*.ko $GITHUB_WORKSPACE/output/ || true
+
+      # ---------- 10. QEMU 启动自测 ----------
+      - name: QEMU boot smoke test
+        if: ${{ github.event.inputs.run_qemu_test != 'false' }}
+        timeout-minutes: 5
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          qemu-system-aarch64 \
+            -M ${{ env.QEMU_MACHINE }} -cpu ${{ env.QEMU_CPU }} \
+            -nographic -smp 2 -m 512M \
+            -kernel $KSRC/arch/arm64/boot/Image \
+            -initrd $GITHUB_WORKSPACE/output/initramfs.cpio.gz \
+            -append "console=ttyAMA0 panic=-1" > /tmp/qemu.log 2>&1 &
+          QEMU_PID=$!
+          # 最多等 180 秒等待启动标志
+          for i in $(seq 1 180); do
+            if grep -q "QEMU-BOOT-OK" /tmp/qemu.log 2>/dev/null; then
+              echo "=== 内核在 QEMU 中启动成功 ==="
+              tail -n 5 /tmp/qemu.log
+              kill $QEMU_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "=== 超时未检测到启动标志，日志如下 ==="
+          cat /tmp/qemu.log || true
+          kill $QEMU_PID 2>/dev/null || true
+          exit 1
+
+      # ---------- 11. 收集产物 ----------
+      - name: Collect artifacts
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          mkdir -p $GITHUB_WORKSPACE/output/boot $GITHUB_WORKSPACE/output/dtbs
+          cp $KSRC/vmlinux $GITHUB_WORKSPACE/output/boot/        # ELF 带符号，可 gdb 调试
+          cp $KSRC/arch/arm64/boot/Image $GITHUB_WORKSPACE/output/boot/
+          cp $KSRC/arch/arm64/boot/Image.gz $GITHUB_WORKSPACE/output/boot/
+          cp $KSRC/System.map $GITHUB_WORKSPACE/output/boot/
+          cp $KSRC/.config $GITHUB_WORKSPACE/output/boot/kernel.config
+          find $KSRC/arch/arm64/boot/dts -name '*.dtb' -exec cp {} $GITHUB_WORKSPACE/output/dtbs/ \;
+          cp $GITHUB_WORKSPACE/scripts/run-qemu.sh $GITHUB_WORKSPACE/output/
+          chmod +x $GITHUB_WORKSPACE/output/run-qemu.sh
+          echo "=== Output ==="
+          du -sh $GITHUB_WORKSPACE/output/*
+
+      # ---------- 12. 上传产物 ----------
+      - name: Upload QEMU bootable package (vmlinux + rootfs + script)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-boot-aarch64-${{ steps.kernel.outputs.version }}
+          path: |
+            output/boot/vmlinux
+            output/boot/Image
+            output/boot/kernel.config
+            output/rootfs.ext4
+            output/initramfs.cpio.gz
+            output/run-qemu.sh
+
+      - name: Upload kernel misc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-misc-${{ steps.kernel.outputs.version }}-aarch64
+          path: |
+            output/boot/Image.gz
+            output/boot/System.map
+            output/dtbs/*
+
+      - name: Upload out-of-tree module artifact
+        if: ${{ github.event.inputs.build_module != 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-module-${{ steps.kernel.outputs.version }}-aarch64
+          path: kernel-module/*.ko

@@ -1,0 +1,10 @@
+# 构建输出
+output/
+*.ko
+*.o
+*.cmd
+*.mod
+*.mod.c
+Module.symvers
+modules.order
+.tmp_versions/
