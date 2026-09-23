@@ -211,7 +211,7 @@ jobs:
           cp $BB/busybox $ROOTFS/bin/
           ln -sf /bin/busybox $ROOTFS/bin/sh   # busybox-links.sh 需要先有 busybox 可执行体
           # 导出全部 busybox applet 为符号链接（通过 qemu-user 执行 --list）
-          $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
+          bash $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
           # /etc/hostname、/etc/fstab（mount -a 自动挂载）与 inittab（busybox init）
           echo "qemu-arm64" > $ROOTFS/etc/hostname
           cat > $ROOTFS/etc/fstab <<'EOF'
@@ -253,7 +253,7 @@ jobs:
           BB=${{ steps.busybox.outputs.busybox_dir }}
           cp $BB/busybox $ROOTFS/bin/
           # 导出全部 busybox applet 为符号链接（含 init 所需的 sh/mount 等）
-          $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
+          bash $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
           # init 脚本：基础挂载 + 自动探测并挂载 ext4 块设备
           cat > $ROOTFS/init <<'EOF'
           #!/bin/sh
