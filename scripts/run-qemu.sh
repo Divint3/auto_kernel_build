@@ -79,7 +79,7 @@ else
     -device virtio-blk-device,drive=hd1
     -drive "file=$ROOTFS,format=raw,if=none,id=hd0"
     -device virtio-blk-device,drive=hd0
-    -append "console=ttyAMA0 root=/dev/vda rw"
+    -append "console=ttyAMA0 root=/dev/vda rw rootwait"
   )
 fi
 

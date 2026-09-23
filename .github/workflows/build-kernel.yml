@@ -154,7 +154,8 @@ jobs:
             # 校验：olddefconfig 会静默丢弃依赖不满足的符号，必须显式回读检查
             for sym in TTY PRINTK BINFMT_ELF BINFMT_SCRIPT BLK_DEV_INITRD RD_GZIP \
                        PROC_FS SYSFS DEVTMPFS SERIAL_AMBA_PL011_CONSOLE MODULES \
-                       MODULE_UNLOAD PCI VIRTIO_MENU VIRTIO_PCI VIRTIO_BLK EXT4_FS; do
+                       MODULE_UNLOAD PCI VIRTIO_MENU VIRTIO VIRTIO_MMIO \
+                       VIRTIO_PCI VIRTIO_BLK EXT4_FS; do
               grep -q "^CONFIG_${sym}=y" .config \
                 || { echo "MISSING CONFIG_${sym} (依赖不满足或符号名有误)"; exit 1; }
             done
@@ -324,8 +325,10 @@ jobs:
             -M ${{ env.QEMU_MACHINE }} -cpu ${{ env.QEMU_CPU }} \
             -nographic -smp 2 -m 512M \
             -kernel $KSRC/arch/arm64/boot/Image \
-            -drive file=$GITHUB_WORKSPACE/output/rootfs.ext4,format=raw,if=virtio \
-            -append "console=ttyAMA0 root=/dev/vda rw panic=-1" > /tmp/qemu-ext4.log 2>&1 &
+            # 实测：必须显式指定 virtio-mmio 传输（if=virtio 会创建 PCI 设备，minimal 内核无 PCIe 主桥驱动，root 挂载失败）
+            -drive file=$GITHUB_WORKSPACE/output/rootfs.ext4,format=raw,if=none,id=hd0 \
+            -device virtio-blk-device,drive=hd0 \
+            -append "console=ttyAMA0 root=/dev/vda rw rootwait panic=-1" > /tmp/qemu-ext4.log 2>&1 &
           QEMU_PID=$!
           for i in $(seq 1 180); do
             if grep -q "ext4 rootfs boot OK" /tmp/qemu-ext4.log 2>/dev/null; then
