@@ -320,11 +320,12 @@ jobs:
         timeout-minutes: 5
         run: |
           KSRC=${{ steps.src.outputs.kernel_dir }}
+          # 实测：必须显式指定 virtio-mmio 传输（if=virtio 会创建 PCI 设备，minimal 内核无 PCIe 主桥驱动，root 挂载失败）
+          # 注意：注释不能写在 QEMU 命令的续行符之间，否则 # 会截断命令导致 -drive/-append 丢失
           qemu-system-aarch64 \
             -M ${{ env.QEMU_MACHINE }} -cpu ${{ env.QEMU_CPU }} \
             -nographic -smp 2 -m 512M \
             -kernel $KSRC/arch/arm64/boot/Image \
-            # 实测：必须显式指定 virtio-mmio 传输（if=virtio 会创建 PCI 设备，minimal 内核无 PCIe 主桥驱动，root 挂载失败）
             -drive file=$GITHUB_WORKSPACE/output/rootfs.ext4,format=raw,if=none,id=hd0 \
             -device virtio-blk-device,drive=hd0 \
             -append "console=ttyAMA0 root=/dev/vda rw rootwait panic=-1" > /tmp/qemu-ext4.log 2>&1 &
