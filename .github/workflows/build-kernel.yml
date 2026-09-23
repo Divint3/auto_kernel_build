@@ -194,7 +194,9 @@ jobs:
           BB=${{ steps.busybox.outputs.busybox_dir }}
           cp $BB/busybox $ROOTFS/bin/
           # 补齐 busybox 符号链接（sh、mount 等）
-
+          for cmd in sh ash ls cat echo cp mv rm mkdir rmdir ln touch mount umount mdev blkid fdisk insmod rmmod lsmod modprobe ps kill sleep poweroff reboot ifconfig ip udhcpc ping dmesg grep sed awk cut sort head tail wc tar gzip gunzip zcat true false test printf '[' '[['; do
+              ln -sf /bin/busybox "$ROOTFS/bin/$cmd"
+          done
           # init 脚本
           cat > $ROOTFS/init <<'EOF'
           #!/bin/sh
