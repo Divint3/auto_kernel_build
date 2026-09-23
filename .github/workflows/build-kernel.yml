@@ -118,7 +118,13 @@ jobs:
               --enable CONFIG_MODULES \
               --enable CONFIG_SERIAL_AMBA_PL011 \
               --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
-              --set-str CONFIG_CMDLINE "console=ttyAMA0"
+              --set-str CONFIG_CMDLINE "console=ttyAMA0" \
+              --enable CONFIG_NET_9P \
+              --enable CONFIG_NET_9P_VIRTIO \
+              --enable CONFIG_9P_FS \
+              --enable CONFIG_VIRTIO \
+              --enable CONFIG_VIRTIO_MMIO
+              
             # ext4 根文件系统启动链（initramfs 模式也可保留，体积影响极小）
             # 注意：VIRTIO_MENU 是 Virtio 驱动目录的总开关（default y 被 allnoconfig 关掉），
             #       不打开它，VIRTIO_PCI/VIRTIO_BLK 在 Kconfig 中不可见，enable 会被静默丢弃
@@ -131,7 +137,12 @@ jobs:
               --enable CONFIG_VIRTIO_PCI \
               --enable CONFIG_VIRTIO_BLK \
               --enable CONFIG_VIRTIO_MMIO \
-              --enable CONFIG_EXT4_FS
+              --enable CONFIG_EXT4_FS \
+              --enable CONFIG_NET_9P \
+              --enable CONFIG_NET_9P_VIRTIO \
+              --enable CONFIG_9P_FS \
+              --enable CONFIG_VIRTIO \
+              --enable CONFIG_VIRTIO_MMIO
             make olddefconfig
             # 校验：olddefconfig 会静默丢弃依赖不满足的符号，必须显式回读检查
             for sym in TTY PRINTK BINFMT_ELF BINFMT_SCRIPT BLK_DEV_INITRD RD_GZIP \
@@ -187,9 +198,7 @@ jobs:
           BB=${{ steps.busybox.outputs.busybox_dir }}
           cp $BB/busybox $ROOTFS/bin/
           # 补齐 busybox 符号链接（sh、mount 等）
-          for cmd in sh mount umount ls cat echo ps mkdir rm cp mv poweroff reboot sleep; do
-            ln -sf /bin/busybox $ROOTFS/bin/$cmd
-          done
+
           # init 脚本
           cat > $ROOTFS/init <<'EOF'
           #!/bin/sh
@@ -219,8 +228,17 @@ jobs:
                    $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp $ROOTFS/root \
                    $ROOTFS/lib/modules $ROOTFS/usr/bin $ROOTFS/usr/sbin $ROOTFS/var/log
           cp $BB/busybox $ROOTFS/bin/
-          for cmd in sh mount umount ls cat echo ps mkdir rm cp mv poweroff reboot sleep; do
-            ln -sf /bin/busybox $ROOTFS/bin/$cmd
+          for cmd in \
+            sh ash ls cat echo cp mv rm mkdir rmdir ln touch \
+            mount umount mdev blkid fdisk \
+            insmod rmmod lsmod modprobe \
+            ps kill sleep poweroff reboot \
+            ifconfig ip udhcpc ping \
+            dmesg grep sed awk cut sort head tail wc \
+            tar gzip gunzip zcat \
+            true false test printf \
+            '[' '[['; do
+              ln -sf /bin/busybox "$ROOTFS/bin/$cmd"
           done
           # /etc/fstab 与 inittab（busybox init）
           echo "proc  /proc  proc  defaults  0  0" > $ROOTFS/etc/fstab
