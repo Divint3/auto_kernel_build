@@ -5,24 +5,32 @@
 #   ./run-qemu.sh -i Image -r rootfs.ext4            # 指定内核与 ext4 根文件系统
 #   ./run-qemu.sh -i Image -n initramfs.cpio.gz      # 使用 initramfs 启动
 #   ./run-qemu.sh -d                                 # 启动 gdb 调试端口 (1234)，配合 vmlinux
+#   ./run-qemu.sh -D data.img                        # 指定数据盘（不存在则自动创建+格式化）
 #
-# 依赖: qemu-system-aarch64
+# 数据同步:
+#   数据盘自动作为 /dev/vdb 附加，rootfs 内 /etc/fstab 已配置开机自动挂载到 /mnt/data。
+#   宿主机读写 data.img 内容:  Linux/WSL:  sudo mount -o loop data.img /mnt/data
+#                              Windows:    用 qemu-nbd 或 7-Zip 直接打开 ext4 镜像
+# 依赖: qemu-system-aarch64（自动创建数据盘时需要 mkfs.ext4，缺失时仅建裸盘）
 set -euo pipefail
 
 KERNEL=""
 ROOTFS=""
 INITRD=""
+DATA=""
 GDB=0
 SMP=2
 MEM=512M
+DATA_SIZE=1G
 
 usage() { grep '^#' "$0" | tail -n +2; exit 0; }
 
-while getopts "i:r:n:mds:h" opt; do
+while getopts "i:r:n:D:mds:h" opt; do
   case $opt in
     i) KERNEL=$OPTARG ;;
     r) ROOTFS=$OPTARG ;;
     n) INITRD=$OPTARG ;;
+    D) DATA=$OPTARG ;;
     m) GDB=1 ;;
     s) SMP=$OPTARG ;;
     h) usage ;;
@@ -37,6 +45,8 @@ if [ -z "$ROOTFS" ] && [ -z "$INITRD" ]; then
   [ -f rootfs.ext4 ] && ROOTFS=rootfs.ext4
   [ -f initramfs.cpio.gz ] && INITRD=initramfs.cpio.gz
 fi
+# 数据盘默认名
+[ -z "$DATA" ] && DATA=data.img
 
 [ -z "$KERNEL" ] && { echo "错误: 未找到内核镜像，用 -i 指定"; exit 1; }
 
@@ -52,9 +62,23 @@ if [ -n "$INITRD" ]; then
   CMD+=(-initrd "$INITRD" -append "console=ttyAMA0")
 else
   [ -z "$ROOTFS" ] && { echo "错误: 未找到根文件系统，用 -r 或 -n 指定"; exit 1; }
-  echo ">>> ext4 根文件系统模式: kernel=$KERNEL rootfs=$ROOTFS"
+  # 数据盘：不存在则创建（稀疏文件），有 mkfs.ext4 就顺手格式化
+  if [ ! -f "$DATA" ]; then
+    echo ">>> 创建数据盘 $DATA ($DATA_SIZE, sparse)"
+    dd if=/dev/zero of="$DATA" bs=1 seek="$DATA_SIZE" count=0 2>/dev/null
+    if command -v mkfs.ext4 >/dev/null 2>&1; then
+      mkfs.ext4 -q -F "$DATA"
+    else
+      echo ">>> 警告: 未找到 mkfs.ext4，数据盘未格式化，需在 guest 内执行 mkfs.ext4 /dev/vdb"
+    fi
+  fi
+  echo ">>> ext4 根文件系统模式: kernel=$KERNEL rootfs=$ROOTFS data=$DATA"
+  # 设备顺序（实测为准）：data.img 在前，rootfs 在后，root=/dev/vda 引导正常
   CMD+=(
-    -drive "file=$ROOTFS,format=raw,if=virtio"
+    -drive "file=$DATA,format=raw,if=none,id=hd1"
+    -device virtio-blk-device,drive=hd1
+    -drive "file=$ROOTFS,format=raw,if=none,id=hd0"
+    -device virtio-blk-device,drive=hd0
     -append "console=ttyAMA0 root=/dev/vda rw"
   )
 fi

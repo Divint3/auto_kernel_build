@@ -66,17 +66,27 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev jq cpio wget curl \
             dwarves xz-utils patchutils python3 python-is-python3 \
-            e2fsprogs qemu-system-arm ipxe-qemu
+            e2fsprogs qemu-system-arm qemu-user-static ipxe-qemu
 
-      # ---------- 3. 下载指定版本工具链 ----------
+      # ---------- 3. 下载指定版本工具链（带缓存）----------
+      - name: Cache cross toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchain
+          key: arm-gnu-toolchain-${{ github.event.inputs.toolchain_version || '13.2.rel1' }}-aarch64
+
       - name: Download cross toolchain
         run: |
-          mkdir -p $HOME/toolchain
-          VER=${{ github.event.inputs.toolchain_version || '13.2.rel1' }}
-          URL="https://developer.arm.com/-/media/Files/downloads/gnu/${VER}/binrel/arm-gnu-toolchain-${VER}-x86_64-aarch64-none-linux-gnu.tar.xz"
-          echo "Downloading toolchain: $URL"
-          wget -q --show-progress "$URL" -O /tmp/toolchain.tar.xz
-          tar -xf /tmp/toolchain.tar.xz -C $HOME/toolchain --strip-components=1
+          if [ -x $HOME/toolchain/bin/${CROSS_COMPILE}gcc ]; then
+            echo "=== 工具链缓存命中，跳过下载 ==="
+          else
+            mkdir -p $HOME/toolchain
+            VER=${{ github.event.inputs.toolchain_version || '13.2.rel1' }}
+            URL="https://developer.arm.com/-/media/Files/downloads/gnu/${VER}/binrel/arm-gnu-toolchain-${VER}-x86_64-aarch64-none-linux-gnu.tar.xz"
+            echo "Downloading toolchain: $URL"
+            wget -q --show-progress "$URL" -O /tmp/toolchain.tar.xz
+            tar -xf /tmp/toolchain.tar.xz -C $HOME/toolchain --strip-components=1
+          fi
           $HOME/toolchain/bin/${CROSS_COMPILE}gcc --version | head -n1
           echo "$HOME/toolchain/bin" >> $GITHUB_PATH
 
@@ -116,6 +126,7 @@ jobs:
               --enable CONFIG_SMP \
               --enable CONFIG_MMU \
               --enable CONFIG_MODULES \
+              --enable CONFIG_MODULE_UNLOAD \
               --enable CONFIG_SERIAL_AMBA_PL011 \
               --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
               --set-str CONFIG_CMDLINE "console=ttyAMA0" \
@@ -143,7 +154,7 @@ jobs:
             # 校验：olddefconfig 会静默丢弃依赖不满足的符号，必须显式回读检查
             for sym in TTY PRINTK BINFMT_ELF BINFMT_SCRIPT BLK_DEV_INITRD RD_GZIP \
                        PROC_FS SYSFS DEVTMPFS SERIAL_AMBA_PL011_CONSOLE MODULES \
-                       PCI VIRTIO_MENU VIRTIO_PCI VIRTIO_BLK EXT4_FS; do
+                       MODULE_UNLOAD PCI VIRTIO_MENU VIRTIO_PCI VIRTIO_BLK EXT4_FS; do
               grep -q "^CONFIG_${sym}=y" .config \
                 || { echo "MISSING CONFIG_${sym} (依赖不满足或符号名有误)"; exit 1; }
             done
@@ -186,36 +197,7 @@ jobs:
           file busybox   # 应显示 statically linked
           echo "busybox_dir=$HOME/busybox-${BUSYBOX_VERSION}" >> $GITHUB_OUTPUT
 
-      # ---------- 7. 制作 initramfs（快速启动验证用）----------
-      - name: Create initramfs
-        run: |
-          ROOTFS=$HOME/initramfs-root
-          mkdir -p $ROOTFS/bin $ROOTFS/proc $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp $ROOTFS/root $ROOTFS/mnt
-          BB=${{ steps.busybox.outputs.busybox_dir }}
-          cp $BB/busybox $ROOTFS/bin/
-          # 补齐 busybox 符号链接（sh、mount 等）
-          for cmd in sh ash ls cat echo cp mv rm mkdir rmdir ln touch mount umount mdev blkid fdisk insmod rmmod lsmod modprobe ps kill sleep poweroff reboot ifconfig ip udhcpc ping dmesg grep sed awk cut sort head tail wc tar gzip gunzip zcat true false test printf '[' '[['; do
-              ln -sf /bin/busybox "$ROOTFS/bin/$cmd"
-          done
-          # init 脚本
-          cat > $ROOTFS/init <<'EOF'
-          #!/bin/sh
-          mount -t proc none /proc
-          mount -t sysfs none /sys
-          mount -t devtmpfs none /dev
-          echo "============================================"
-          echo " QEMU aarch64 initramfs boot OK!"
-          echo " $(uname -a)"
-          echo "============================================"
-          echo "QEMU-BOOT-OK"
-          exec /bin/sh
-          EOF
-          chmod +x $ROOTFS/init
-          mkdir -p $GITHUB_WORKSPACE/output
-          cd $ROOTFS
-          find . | cpio -o -H newc | gzip > $GITHUB_WORKSPACE/output/initramfs.cpio.gz
-
-      # ---------- 8. 制作 ext4 根文件系统（含内核模块）----------
+      # ---------- 8. 制作 ext4 根文件系统（仅含内核模块，树外模块独立流程处理）----------
       - name: Create ext4 rootfs
         run: |
           KSRC=${{ steps.src.outputs.kernel_dir }}
@@ -223,15 +205,24 @@ jobs:
           IMG=$GITHUB_WORKSPACE/output/rootfs.ext4
           ROOTFS=$HOME/ext4-root
           mkdir -p $ROOTFS/bin $ROOTFS/sbin $ROOTFS/etc/init.d $ROOTFS/proc \
-                   $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp $ROOTFS/root \
+                   $ROOTFS/sys $ROOTFS/dev/pts $ROOTFS/tmp $ROOTFS/root $ROOTFS/mnt \
+                   $ROOTFS/mnt/data $ROOTFS/mnt/rootfs \
                    $ROOTFS/lib/modules $ROOTFS/usr/bin $ROOTFS/usr/sbin $ROOTFS/var/log
           cp $BB/busybox $ROOTFS/bin/
-          for cmd in sh ash ls cat echo cp mv rm mkdir rmdir ln touch mount umount mdev blkid fdisk insmod rmmod lsmod modprobe ps kill sleep poweroff reboot ifconfig ip udhcpc ping dmesg grep sed awk cut sort head tail wc tar gzip gunzip zcat true false test printf '[' '[['; do
-              ln -sf /bin/busybox "$ROOTFS/bin/$cmd"
-          done
-          # /etc/fstab 与 inittab（busybox init）
-          echo "proc  /proc  proc  defaults  0  0" > $ROOTFS/etc/fstab
-          echo "sysfs /sys   sysfs defaults  0  0" >> $ROOTFS/etc/fstab
+          ln -sf /bin/busybox $ROOTFS/bin/sh   # busybox-links.sh 需要先有 busybox 可执行体
+          # 导出全部 busybox applet 为符号链接（通过 qemu-user 执行 --list）
+          $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
+          # /etc/hostname、/etc/fstab（mount -a 自动挂载）与 inittab（busybox init）
+          echo "qemu-arm64" > $ROOTFS/etc/hostname
+          cat > $ROOTFS/etc/fstab <<'EOF'
+          proc     /proc      proc     defaults            0  0
+          sysfs    /sys       sysfs    defaults            0  0
+          devtmpfs /dev       devtmpfs defaults            0  0
+          devpts   /dev/pts   devpts   defaults            0  0
+          tmpfs    /tmp       tmpfs    defaults            0  0
+          # 数据盘（run-qemu.sh 附加的第二块 virtio 盘），nofail：不接盘也能正常启动
+          /dev/vdb /mnt/data  ext4     defaults,nofail     0  0
+          EOF
           cat > $ROOTFS/etc/inittab <<'EOF'
           ::sysinit:/etc/init.d/rcS
           ttyAMA0::respawn:/bin/sh
@@ -239,9 +230,9 @@ jobs:
           EOF
           cat > $ROOTFS/etc/init.d/rcS <<'EOF'
           #!/bin/sh
-          mount -a
+          hostname -F /etc/hostname 2>/dev/null
           mkdir -p /dev/pts
-          mount -t devpts devpts /dev/pts
+          mount -a          # 按 /etc/fstab 自动挂载全部伪文件系统
           echo "ext4 rootfs boot OK: $(uname -a)"
           EOF
           chmod +x $ROOTFS/etc/init.d/rcS
@@ -253,17 +244,50 @@ jobs:
           dd if=/dev/zero of=$IMG bs=1M count=256
           mkfs.ext4 -F -d $ROOTFS $IMG
 
-      # ---------- 9. 编译树外内核模块示例 ----------
-      - name: Build out-of-tree module
-        if: ${{ github.event.inputs.build_module != 'false' }}
+      # ---------- 9. 制作 initramfs（快速启动验证 + 自动挂载块设备）----------
+      - name: Create initramfs
         run: |
-          KSRC=${{ steps.src.outputs.kernel_dir }}
-          make -C $KSRC M=$GITHUB_WORKSPACE/kernel-module modules
+          ROOTFS=$HOME/initramfs-root
+          mkdir -p $ROOTFS/bin $ROOTFS/proc $ROOTFS/sys $ROOTFS/dev $ROOTFS/tmp \
+                   $ROOTFS/root $ROOTFS/mnt/rootfs
+          BB=${{ steps.busybox.outputs.busybox_dir }}
+          cp $BB/busybox $ROOTFS/bin/
+          # 导出全部 busybox applet 为符号链接（含 init 所需的 sh/mount 等）
+          $GITHUB_WORKSPACE/scripts/busybox-links.sh $BB/busybox $ROOTFS /bin
+          # init 脚本：基础挂载 + 自动探测并挂载 ext4 块设备
+          cat > $ROOTFS/init <<'EOF'
+          #!/bin/sh
+          export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+          mount -t proc none /proc
+          mount -t sysfs none /sys
+          mount -t devtmpfs none /dev
+          mkdir -p /dev/pts
+          mount -t devpts devpts /dev/pts
+          hostname qemu-arm64
+          echo "============================================"
+          echo " QEMU aarch64 initramfs boot OK!"
+          echo " $(uname -a)"
+          echo "============================================"
+          # 自动挂载：探测 virtio/通用块设备并挂到 /mnt/rootfs
+          for dev in /dev/vda /dev/vdb /dev/sda /dev/nvme0n1; do
+            if [ -b "$dev" ]; then
+              if mount -t ext4 "$dev" /mnt/rootfs 2>/dev/null; then
+                echo "AUTO-MOUNT: $dev -> /mnt/rootfs"
+                ls /mnt/rootfs
+                break
+              fi
+            fi
+          done
+          echo "QEMU-BOOT-OK"
+          exec /bin/sh
+          EOF
+          chmod +x $ROOTFS/init
           mkdir -p $GITHUB_WORKSPACE/output
-          cp $GITHUB_WORKSPACE/kernel-module/*.ko $GITHUB_WORKSPACE/output/ || true
+          cd $ROOTFS
+          find . | cpio -o -H newc | gzip > $GITHUB_WORKSPACE/output/initramfs.cpio.gz
 
-      # ---------- 10. QEMU 启动自测 ----------
-      - name: QEMU boot smoke test
+      # ---------- 11. QEMU 启动自测 A：initramfs ----------
+      - name: QEMU boot smoke test (initramfs)
         if: ${{ github.event.inputs.run_qemu_test != 'false' }}
         timeout-minutes: 5
         run: |
@@ -273,24 +297,62 @@ jobs:
             -nographic -smp 2 -m 512M \
             -kernel $KSRC/arch/arm64/boot/Image \
             -initrd $GITHUB_WORKSPACE/output/initramfs.cpio.gz \
-            -append "console=ttyAMA0 panic=-1" > /tmp/qemu.log 2>&1 &
+            -append "console=ttyAMA0 panic=-1" > /tmp/qemu-initrd.log 2>&1 &
           QEMU_PID=$!
           # 最多等 180 秒等待启动标志
           for i in $(seq 1 180); do
-            if grep -q "QEMU-BOOT-OK" /tmp/qemu.log 2>/dev/null; then
-              echo "=== 内核在 QEMU 中启动成功 ==="
-              tail -n 5 /tmp/qemu.log
+            if grep -q "QEMU-BOOT-OK" /tmp/qemu-initrd.log 2>/dev/null; then
+              echo "=== 内核在 QEMU 中启动成功（initramfs）==="
+              tail -n 8 /tmp/qemu-initrd.log
               kill $QEMU_PID 2>/dev/null || true
               exit 0
             fi
             sleep 1
           done
           echo "=== 超时未检测到启动标志，日志如下 ==="
-          cat /tmp/qemu.log || true
+          cat /tmp/qemu-initrd.log || true
           kill $QEMU_PID 2>/dev/null || true
           exit 1
 
-      # ---------- 11. 收集产物 ----------
+      # ---------- 12. QEMU 启动自测 B：ext4 根文件系统 ----------
+      - name: QEMU boot smoke test (ext4 rootfs)
+        if: ${{ github.event.inputs.run_qemu_test != 'false' }}
+        timeout-minutes: 5
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          qemu-system-aarch64 \
+            -M ${{ env.QEMU_MACHINE }} -cpu ${{ env.QEMU_CPU }} \
+            -nographic -smp 2 -m 512M \
+            -kernel $KSRC/arch/arm64/boot/Image \
+            -drive file=$GITHUB_WORKSPACE/output/rootfs.ext4,format=raw,if=virtio \
+            -append "console=ttyAMA0 root=/dev/vda rw panic=-1" > /tmp/qemu-ext4.log 2>&1 &
+          QEMU_PID=$!
+          for i in $(seq 1 180); do
+            if grep -q "ext4 rootfs boot OK" /tmp/qemu-ext4.log 2>/dev/null; then
+              echo "=== ext4 根文件系统引导成功 ==="
+              tail -n 12 /tmp/qemu-ext4.log
+              kill $QEMU_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "=== 超时未检测到启动标志，日志如下 ==="
+          cat /tmp/qemu-ext4.log || true
+          kill $QEMU_PID 2>/dev/null || true
+          exit 1
+
+      # ---------- 13. 树外内核模块（独立流程：编译 + 部署到 output）----------
+      - name: Build and deploy out-of-tree module
+        if: ${{ github.event.inputs.build_module != 'false' }}
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          make -C $KSRC M=$GITHUB_WORKSPACE/kernel-module modules
+          mkdir -p $GITHUB_WORKSPACE/output/modules
+          cp $GITHUB_WORKSPACE/kernel-module/*.ko $GITHUB_WORKSPACE/output/modules/
+          echo "=== 模块部署完成 ==="
+          ls -la $GITHUB_WORKSPACE/output/modules/
+
+      # ---------- 14. 收集产物 ----------
       - name: Collect artifacts
         run: |
           KSRC=${{ steps.src.outputs.kernel_dir }}
@@ -306,7 +368,7 @@ jobs:
           echo "=== Output ==="
           du -sh $GITHUB_WORKSPACE/output/*
 
-      # ---------- 12. 上传产物 ----------
+      # ---------- 15. 上传产物 ----------
       - name: Upload QEMU bootable package (vmlinux + rootfs + script)
         uses: actions/upload-artifact@v4
         with:

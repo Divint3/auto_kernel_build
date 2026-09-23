@@ -27,6 +27,11 @@
 # gdb 调试模式（端口 1234，配合 vmlinux + aarch64-none-linux-gnu-gdb）
 ./run-qemu.sh -i boot/Image -r rootfs.ext4 -m
 # 另一终端: target remote :1234; file vmlinux; b start_kernel; c
+
+# 数据同步盘（host <-> guest）
+./run-qemu.sh -i boot/Image -r rootfs.ext4        # data.img 不存在时自动创建+格式化
+# guest 内自动挂载到 /mnt/data（fstab nofail）；宿主机读写:
+sudo mount -o loop data.img /mnt/data   # Linux/WSL；Windows 可用 7-Zip 打开 ext4 镜像
 ```
 
 ## 可配输入项
