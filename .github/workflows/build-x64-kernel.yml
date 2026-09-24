@@ -160,7 +160,8 @@ jobs:
                               --enable CONFIG_DEVTMPFS_MOUNT
             make olddefconfig
           fi
-
-          make -j$(nproc) all# all = vmlinux + Image + modules
+          
+          pwd
+          make -j$(nproc) all
           # 供树外模块 M= 编译使用（minimal 配置下必须显式准备）
           make modules_prepare
