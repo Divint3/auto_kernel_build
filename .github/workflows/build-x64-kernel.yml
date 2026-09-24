@@ -2,6 +2,9 @@ name: Build x86 Kernel (QEMU bootable)
 
 # 手动触发 + 定时触发（每周检查一次最新内核）
 on:
+  push:
+    branches:
+      - '*'
   workflow_dispatch:
     inputs:
       kernel_version:
@@ -36,6 +39,10 @@ env:
   QEMU_MACHINE: q35
   QEMU_CPU: qemu64
   BUSYBOX_VERSION: 1.36.1
+  TOOLCHAIN_VERSION: ${{ inputs.toolchain_version || '13.2.rel1' }}
+  BUILD_MODULE: ${{ inputs.build_module || 'true' }}
+  RUN_QEMU_TEST: ${{ inputs.run_qemu_test || 'true' }}
+  MINIMAL_CONFIG: ${{ inputs.minimal_config || 'true' }}
 
 jobs:
   build:
