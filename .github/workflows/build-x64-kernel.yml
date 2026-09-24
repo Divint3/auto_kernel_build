@@ -1,0 +1,162 @@
+name: Build x86 Kernel (QEMU bootable)
+
+# 手动触发 + 定时触发（每周检查一次最新内核）
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: '内核版本（如 6.9.2），留空 = 自动下载最新 stable 版本'
+        required: false
+        default: ''
+      toolchain_version:
+        description: 'Arm GNU 工具链版本（如 13.2.rel1）'
+        required: false
+        default: '13.2.rel1'
+      build_module:
+        description: '是否编译内核模块示例'
+        required: false
+        type: boolean
+        default: true
+      run_qemu_test:
+        description: '构建后是否在 CI 中用 QEMU 启动自测'
+        required: false
+        type: boolean
+        default: true
+      minimal_config:
+        description: '快速编译模式（allnoconfig 最小配置，约 3~5 分钟；关闭 = defconfig 全量配置）'
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    - cron: '0 18 * * 0'   # 每周日 UTC 18:00（北京时间周一凌晨 2 点）自动用最新内核构建
+
+env:
+  ARCH: x86_64
+  CROSS_COMPILE: 
+  QEMU_MACHINE: q35
+  QEMU_CPU: qemu64
+  BUSYBOX_VERSION: 1.36.1
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------- 1. 解析内核版本 ----------
+      - name: Resolve kernel version
+        id: kernel
+        run: |
+          if [ -n "${{ github.event.inputs.kernel_version }}" ]; then
+            VER="${{ github.event.inputs.kernel_version }}"
+          else
+            # 从 kernel.org 官方 JSON 获取最新 stable 版本
+            VER=$(curl -s https://www.kernel.org/releases.json | jq -r '.releases[] | select(.moniker=="stable") | .version' | head -n1)
+          fi
+          echo "Using kernel version: $VER"
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+      # ---------- 2. 安装构建依赖 ----------
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev jq cpio wget curl \
+            dwarves xz-utils patchutils python3 python-is-python3 \
+            e2fsprogs qemu qemu-user-static ipxe-qemu gcc
+
+      # ---------- 4. 下载内核源码 ----------
+      - name: Download kernel source
+        id: src
+        run: |
+          VER=${{ steps.kernel.outputs.version }}
+          MAJOR=$(echo $VER | cut -d. -f1)
+          URL="https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${VER}.tar.xz"
+          echo "Downloading kernel: $URL"
+          wget -q --show-progress "$URL" -O /tmp/linux.tar.xz
+          tar -xf /tmp/linux.tar.xz -C $HOME
+          echo "kernel_dir=$HOME/linux-${VER}" >> $GITHUB_OUTPUT
+
+      # ---------- 5. 编译内核（vmlinux + Image + modules + dtbs）----------
+      - name: Build kernel
+        run: |
+          KSRC=${{ steps.src.outputs.kernel_dir }}
+          cd $KSRC
+
+          if [ "${{ github.event.inputs.minimal_config || 'true' }}" = "true" ]; then
+            # ===== 快速编译：allnoconfig 最小配置（QEMU virt 可引导的最小符号集）=====
+            make allnoconfig
+            # 基础可运行项（allnoconfig 会把 default y 的选项全部关掉，必须逐个补回）
+            ./scripts/config \
+              --enable CONFIG_TTY \
+              --enable CONFIG_PRINTK \
+              --enable CONFIG_BINFMT_ELF \
+              --enable CONFIG_BINFMT_SCRIPT \
+              --enable CONFIG_BLK_DEV_INITRD \
+              --enable CONFIG_RD_GZIP \
+              --enable CONFIG_PROC_FS \
+              --enable CONFIG_SYSFS \
+              --enable CONFIG_DEVTMPFS \
+              --enable CONFIG_DEVTMPFS_MOUNT \
+              --enable CONFIG_SMP \
+              --enable CONFIG_MMU \
+              --enable CONFIG_MODULES \
+              --enable CONFIG_MODULE_UNLOAD \
+              --enable CONFIG_SERIAL_AMBA_PL011 \
+              --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
+              --set-str CONFIG_CMDLINE "console=ttyAMA0"
+
+            # ext4 根文件系统启动链（实测：PCI 传输在 minimal 内核不可用，走 virtio-mmio，不编 PCI 子系统）
+            # 注意：VIRTIO_MENU 是 Virtio 驱动目录的总开关（default y 被 allnoconfig 关掉），
+            #       不打开它，VIRTIO_BLK/VIRTIO_MMIO 在 Kconfig 中不可见，enable 会被静默丢弃
+            ./scripts/config \
+              --enable CONFIG_VIRTIO_MENU \
+              --enable CONFIG_VIRTIO \
+              --enable CONFIG_BLOCK \
+              --enable CONFIG_BLK_DEV \
+              --enable CONFIG_VIRTIO_BLK \
+              --enable CONFIG_VIRTIO_MMIO \
+              --enable CONFIG_EXT4_FS
+            # 网络栈 + 9P（virtfs 目录共享：NET/INET 是 9P 系符号的依赖，不开会被静默丢弃）
+            ./scripts/config \
+              --enable CONFIG_NET \
+              --enable CONFIG_INET \
+              --enable CONFIG_NET_9P \
+              --enable CONFIG_NET_9P_VIRTIO \
+              --enable CONFIG_9P_FS
+            make olddefconfig
+            # 校验：olddefconfig 会静默丢弃依赖不满足的符号，必须显式回读检查
+            for sym in TTY PRINTK BINFMT_ELF BINFMT_SCRIPT BLK_DEV_INITRD RD_GZIP \
+                       PROC_FS SYSFS DEVTMPFS SERIAL_AMBA_PL011_CONSOLE MODULES \
+                       MODULE_UNLOAD VIRTIO_MENU VIRTIO VIRTIO_MMIO \
+                       VIRTIO_BLK EXT4_FS NET INET NET_9P NET_9P_VIRTIO 9P_FS; do
+              grep -q "^CONFIG_${sym}=y" .config \
+                || { echo "MISSING CONFIG_${sym} (依赖不满足或符号名有误)"; exit 1; }
+            done
+          elif [ -f $GITHUB_WORKSPACE/configs/custom_defconfig ]; then
+            # ===== 自定义 defconfig =====
+            make defconfig
+            cp $GITHUB_WORKSPACE/configs/custom_defconfig .config
+            make olddefconfig
+          else
+            # ===== 全量 defconfig =====
+            make defconfig
+            ./scripts/config --enable CONFIG_SERIAL_AMBA_PL011 \
+                              --enable CONFIG_SERIAL_AMBA_PL011_CONSOLE \
+                              --enable CONFIG_EXT4_FS \
+                              --enable CONFIG_VIRTIO_PCI \
+                              --enable CONFIG_VIRTIO_BLK \
+                              --enable CONFIG_VIRTIO_NET \
+                              --enable CONFIG_9P_FS \
+                              --enable CONFIG_NET_9P_VIRTIO \
+                              --enable CONFIG_DEVTMPFS \
+                              --enable CONFIG_DEVTMPFS_MOUNT
+            make olddefconfig
+          fi
+
+          make -j$(nproc) all# all = vmlinux + Image + modules
+          # 供树外模块 M= 编译使用（minimal 配置下必须显式准备）
+          make modules_prepare
