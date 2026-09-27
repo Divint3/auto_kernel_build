@@ -18,8 +18,8 @@
 
 /* 读超时（微秒）：9600 波特下 1 字节约 1ms，读一个寄存器(3~5字节)约 4~5ms。
  * 纯 udelay 忙等（不睡眠），保证可在关闭抢占的 FP 保护区内的原子上下文使用。 */
-#define METER_UART_READ_TIMEOUT_US 5000
-#define METER_UART_READ_STEP_US    100
+#define METER_UART_READ_TIMEOUT_US 50000
+#define METER_UART_READ_STEP_US 1000
 
 static struct file *uart_filp = NULL;
 static loff_t uart_read_pos = 0;  /* tty 读流偏移，持续累加 */
