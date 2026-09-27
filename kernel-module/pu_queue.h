@@ -63,11 +63,11 @@ pu_node_p pu_queue_get_link_head(pu_queue_p queue);
  * @param queue 队列指针
  * @return 队列元素数量
  */
-PU_COMPILER_ALWAYS_INLINE inline size_t pu_queue_get_size(pu_queue_p queue) {
+static PU_COMPILER_ALWAYS_INLINE inline size_t pu_queue_get_size(pu_queue_p queue) {
   return (queue != NULL) ? queue->size : 0;
 }
 
-PU_COMPILER_ALWAYS_INLINE inline size_t pu_queue_get_capacity(pu_queue_p queue) {
+static PU_COMPILER_ALWAYS_INLINE inline size_t pu_queue_get_capacity(pu_queue_p queue) {
   if (queue == NULL) {
     return 0;
   } else {
