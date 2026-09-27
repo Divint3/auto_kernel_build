@@ -2,9 +2,7 @@
 #define PU_QUEUE_H
 
 #include "pu_macro.h"
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 节点结构体(内部使用,外部无需暴露)
 typedef struct pu_node_s {

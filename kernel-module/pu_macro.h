@@ -1,13 +1,9 @@
 #ifndef PU_MACRO_H_
 #define PU_MACRO_H_
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_mem_tracker.h"
 #include "pu_type.h"
 #include "pu_util.h"
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 extern FILE *pu_log_file_fd;
 extern const char pu_log_file_name[128];
@@ -85,7 +81,7 @@ static inline pu_data_p PU_DATA_PACK(const void *input_data, size_t length, cons
 #define pu_data_pack(input_data, length) PU_DATA_PACK(input_data, length, __FILE__, __LINE__)
 
 // 封装宏，自动传递文件名、行号，简化调用
-#if __DEBUG_
+#if defined(__DEBUG_) && __DEBUG_
 #define PU_LOG_DEBUG(fmt, ...)            pu_log_printf(PU_LOG_LEVEL_DEBUG, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #define PU_LOG_INFO(fmt, ...)             pu_log_printf(PU_LOG_LEVEL_INFO, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #define PU_LOG_WARN(fmt, ...)             pu_log_printf(PU_LOG_LEVEL_WARN, __FILE__, __LINE__, fmt, ##__VA_ARGS__)

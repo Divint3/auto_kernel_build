@@ -1,8 +1,6 @@
 #include "pu_bitmap.h"
 #include "pu_macro.h"
-#include <stdbool.h>
-#include <stdint.h>
-#include <string.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 初始化 Bitmap 对象
 pu_bitmap_p pu_bitmap_create(size_t max_bits) {

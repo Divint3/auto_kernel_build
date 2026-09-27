@@ -1,17 +1,8 @@
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_util.h"
 #include "pu_compiler.h"
 #include "pu_macro.h"
-#include <ctype.h>
 #include "pu_lock.h"
-
-// #include <fcntl.h>
-#include <stdarg.h> // 可变参数头文件
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 const char pu_log_file_name[128];
 FILE *pu_log_file_fd = NULL;
@@ -236,11 +227,11 @@ pu_data_p pu_hex_string_to_byte_array(pu_data_p input_data) {
 
   for (size_t i = 0; i < result->size; i++) {
     unsigned int byte;
-    // 将两个字符转换为一个字节
-#if defined(__CC_ARM) || defined(__IAR_SYSTEMS_ICC__)
-    sscanf((char *)input_data->data + (i * 2), "%02x", &byte);
-#else
+    // 将两个字符转换为一个字节（sscanf_s 仅 MSVC 提供，其余统一走 sscanf）
+#if defined(_MSC_VER)
     sscanf_s((char *)input_data->data + (i * 2), "%02x", &byte);
+#else
+    sscanf((char *)input_data->data + (i * 2), "%02x", &byte);
 #endif
     result->data[i] = (unsigned char)byte;
   }
@@ -264,11 +255,11 @@ uint32_t pu_inet_aton(const char *ip) {
   uint32_t result = 0;
   int b1, b2, b3, b4;
 
-  // 使用 sscanf 来解析每个部分
-#if defined(__CC_ARM) || defined(__IAR_SYSTEMS_ICC__)
-  sscanf(ip, "%d.%d.%d.%d", &b1, &b2, &b3, &b4);
-#else
+  // 使用 sscanf 来解析每个部分（sscanf_s 仅 MSVC 提供，其余统一走 sscanf）
+#if defined(_MSC_VER)
   sscanf_s(ip, "%d.%d.%d.%d", &b1, &b2, &b3, &b4);
+#else
+  sscanf(ip, "%d.%d.%d.%d", &b1, &b2, &b3, &b4);
 #endif
   // 转换为 uint32_t 类型
   result = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
@@ -577,6 +568,41 @@ bool pu_convert_to_bcd(uint32_t value, uint8_t *buffer, int size) {
   return true;
 }
 
+#ifdef __KERNEL__
+/*
+ * 内核态强符号实现：覆盖下方用户态弱符号的职责，输出走 printk。
+ * pu_fprintf 忽略 stream 参数（stderr/stdout/stdin 均统一到内核日志）。
+ */
+int pu_vfprintf(FILE *stream, const char *format, va_list args) {
+  char buf[256]; // 内核栈有限，限制单条日志长度
+  int ret = vsnprintf(buf, sizeof(buf), format, args);
+  printk("%s", buf);
+  return ret;
+}
+
+int pu_fprintf(FILE *stream, const char *format, ...) {
+  va_list args;
+  int ret;
+  PU_UNUSED(stream);
+  va_start(args, format);
+  ret = pu_vfprintf(stream, format, args);
+  va_end(args);
+  return ret;
+}
+
+int pu_fflush(FILE *stream) {
+  PU_UNUSED(stream);
+  return 0; // printk 无需 flush
+}
+
+void pu_get_log_time(char *time_buf, int buf_len) {
+  if (time_buf != NULL && buf_len > 0) {
+    time_buf[0] = '\0'; // 内核态暂不提供时间戳，可按需用 do_gettimeofday 扩展
+  }
+}
+
+#else /* 用户态：弱符号，允许使用者自行覆盖 */
+
 /**
  * @brief 禁止修改此代码,此代码用于提醒用户自定义自己的pu_fprintf 避免使用默认定义,避免频繁修改库函数
  *
@@ -626,6 +652,8 @@ PU_COMPILER_WEAK void pu_get_log_time(char *time_buf, int buf_len) {
   PU_UNUSED(time_buf);
   PU_UNUSED(buf_len);
 }
+
+#endif /* __KERNEL__ */
 
 /**
  * @brief 获取日志级别字符串

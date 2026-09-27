@@ -1,6 +1,6 @@
 #include "pu_doublecheck_bitmap.h"
 #include "pu_macro.h"
-#include <stdint.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 计算置位位数(内部函数)
 static void pu_doublecheck_bitmap_calc_bit_count(pu_doublecheck_bitmap_p bitmap) {

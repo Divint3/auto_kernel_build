@@ -1,6 +1,6 @@
 #include "pu_queue.h"
 #include "pu_macro.h"
-#include <stdlib.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 pu_queue_p pu_queue_create(size_t capacity) {
   pu_malloc_instance(result, pu_queue); // 复用您的内存分配宏

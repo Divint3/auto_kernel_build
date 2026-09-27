@@ -1,8 +1,7 @@
 #ifndef METER_CHIP_PORT_DRIVER_H_
 #define METER_CHIP_PORT_DRIVER_H_
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 #define METER_CHIP_DRIVER_PARAM_COEFFICIENT (float)10000.0
 

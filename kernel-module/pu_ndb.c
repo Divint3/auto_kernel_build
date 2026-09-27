@@ -60,7 +60,7 @@ bool pu_ndb_load_data(pu_ndb_p ndb, uint8_t *data, uint32_t data_size) {
     ndb->valid = true;
     return true;
   }
-BACKUP_DATA_RELOAD:                                                // lable后面不能直接跟变量声明, 加一个空语句, 别删
+BACKUP_DATA_RELOAD:;                                               // label后面不能直接跟变量声明, 加一个空语句, 别删
   int32_t sector_offset = (final_index / sector_data_block_count); // 扇区偏移
   int32_t data_offset = (final_index % sector_data_block_count);   // 数据偏移
   // 从flash中载入数据

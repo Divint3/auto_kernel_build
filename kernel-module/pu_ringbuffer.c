@@ -1,7 +1,6 @@
 #include "pu_ringbuffer.h"
 #include "pu_macro.h"
-#include <stdint.h>
-#include <stdlib.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 静态缓冲区创建
 pu_ringbuffer_p pu_ringbuffer_create_static(uint8_t *buf, size_t buf_size) {

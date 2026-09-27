@@ -1,7 +1,7 @@
 #include "pu_mem_pool.h"
 #include "pu_compiler.h"
 #include "pu_macro.h"
-#include <string.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 内存对齐检查宏
 #define PU_IS_ALIGNED(addr, align) (((uintptr_t)(addr) & ((align) - 1)) == 0)

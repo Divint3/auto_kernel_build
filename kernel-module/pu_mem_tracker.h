@@ -1,7 +1,7 @@
 #ifndef PU_MEM_TRACKER_H_
 #define PU_MEM_TRACKER_H_
 
-#include <stddef.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 // 内存分配函数指针类型定义
 typedef void *(*pu_calloc_func_t)(size_t size);

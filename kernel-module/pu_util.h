@@ -1,11 +1,10 @@
 #ifndef PU_UTIL_H_
 #define PU_UTIL_H_
 
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_compiler.h"
 #include "pu_macro.h"
 #include "pu_type.h"
-#include <stdbool.h>
-#include <stdio.h>
 
 // 颜色宏定义
 #define COLOR_RESET   "\033[0m"
@@ -281,6 +280,7 @@ uint16_t pu_write_stream(pu_stream_p stream, const void *data, uint16_t data_siz
 bool pu_convert_to_bcd(uint32_t value, uint8_t *buffer, int size);
 
 int pu_fprintf(FILE *stream, const char *format, ...);
+int pu_vfprintf(FILE *stream, const char *format, va_list args);
 
 #define pu_printf(format, ...) pu_fprintf(NULL, format, ##__VA_ARGS__)
 

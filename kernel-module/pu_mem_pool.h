@@ -1,8 +1,7 @@
 #ifndef PU_MEM_POOL_H_
 #define PU_MEM_POOL_H_
 
-#include <stdint.h>
-#include <stdio.h>
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 
 #ifdef __cplusplus
 extern "C" {

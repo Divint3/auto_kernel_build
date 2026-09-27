@@ -3,9 +3,8 @@
 
 #include "meter_chip_port_driver.h"
 #include "pu_doublecheck_bitmap.h"
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_type.h"
-#include <stdbool.h>
-#include <stdint.h>
 
 #define RN8209_CLK_IN                                 ((float)3579545.0)
 

@@ -1,17 +1,14 @@
 #include "rn8209_driver.h"
+#include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_compiler.h"
 #include "pu_doublecheck_bitmap.h"
 #include "pu_macro.h"
 #include "pu_type.h"
 #include "pu_util.h"
-#include <inttypes.h>
-#include <math.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifndef __KERNEL__
+#include <inttypes.h> // 用户态专用（内核无此头）
+#include <math.h>     // 用户态专用；内核态 pow/fabs 由 pu_port.h 提供
+#endif
 
 static size_t communition_faild_counter = 0;
 

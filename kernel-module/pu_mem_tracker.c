@@ -1,23 +1,26 @@
+#include "pu_port.h"   // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_mem_tracker.h"
 #include "pu_macro.h"
-
-#include <linux/slab.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 
 static pu_mem_tracker_t pu_tracker = {0};
 
-// 默认使用C库内存函数
+// 默认内存分配函数：内核态 kzalloc(清零)/kfree，用户态 calloc/free
+#ifdef __KERNEL__
 static void *pu_default_calloc(size_t size) {
-  // return calloc(size, 1);
-  return kmalloc(size, GFP_KERNEL);
+  return kzalloc(size, GFP_KERNEL); // kzalloc 清零，等价于 calloc 语义
 }
 static void pu_default_free(void *ptr) {
-  // free(ptr);
-  kfree(prt);
+  kfree(ptr);
 }
+#else
+static void *pu_default_calloc(size_t size) {
+  return calloc(size, 1);
+}
+static void pu_default_free(void *ptr) {
+  free(ptr);
+}
+#endif
 
 // 初始化内存跟踪器
 void pu_mem_tracker_init(void) {
