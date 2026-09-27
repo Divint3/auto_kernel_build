@@ -112,6 +112,7 @@ int32_t pu_bitmap_find_unset_bits(const pu_bitmap_p bitmap, size_t count);
  * @param[in] bitmap Bitmap 对象指针
  * @return size_t 已使用的位数
  */
+void pu_bitmap_calc_bit_count(const pu_bitmap_p bitmap);
 size_t pu_bitmap_count_set(const pu_bitmap_p bitmap);
 
 /**

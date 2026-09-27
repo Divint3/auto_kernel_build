@@ -81,24 +81,24 @@ static void pu_add_mem_node(pu_mem_node_t *node) {
 
 // 从链表中删除内存节点
 static int pu_remove_mem_node(void *ptr) {
-  pu_mem_node_t *current = pu_tracker.head;
+  pu_mem_node_t *node = pu_tracker.head;
   pu_mem_node_t *prev = NULL;
 
-  while (current != NULL) {
-    if (current->ptr == ptr) {
+  while (node != NULL) {
+    if (node->ptr == ptr) {
       // 找到节点，从链表中移除
       if (prev == NULL) {
-        pu_tracker.head = current->next;
+        pu_tracker.head = node->next;
       } else {
-        prev->next = current->next;
+        prev->next = node->next;
       }
 
-      pu_tracker.current_usage -= current->size;
-      pu_tracker.free_func(current);
+      pu_tracker.current_usage -= node->size;
+      pu_tracker.free_func(node);
       return 1; // 成功删除
     }
-    prev = current;
-    current = current->next;
+    prev = node;
+    node = node->next;
   }
 
   return 0; // 未找到节点
@@ -180,14 +180,14 @@ void pu_mem_tracker_dump(void) {
   PU_LOG_DEBUG("Peak usage: %zu bytes\n", pu_tracker.peak_usage);
   PU_LOG_DEBUG("Memory leaks:\n");
 
-  pu_mem_node_t *current = pu_tracker.head;
+  pu_mem_node_t *node = pu_tracker.head;
   int leak_count = 0;
   size_t leak_size = 0;
 
-  while (current != NULL) {
-    PU_LOG_ERROR("  Leak: %p, %zu bytes at %s:%d\n", current->ptr, current->size, current->file, current->line);
-    leak_size += current->size;
-    current = current->next;
+  while (node != NULL) {
+    PU_LOG_ERROR("  Leak: %p, %zu bytes at %s:%d\n", node->ptr, node->size, node->file, node->line);
+    leak_size += node->size;
+    node = node->next;
     leak_count++;
   }
 
@@ -201,18 +201,18 @@ void pu_mem_tracker_dump(void) {
 
 // 清理内存跟踪器
 void pu_mem_tracker_cleanup(void) {
-  pu_mem_node_t *current = pu_tracker.head;
+  pu_mem_node_t *node = pu_tracker.head;
   pu_mem_node_t *next;
   int leak_count = 0;
   size_t leak_size = 0;
 
-  while (current != NULL) {
-    next = current->next;
-    PU_LOG_DEBUG("pu_mem_tracker WARNING: Memory leak - %p, %zu bytes at %s:%d\n", current->ptr, current->size, current->file, current->line);
-    leak_size += current->size;
-    pu_tracker.free_func(current->ptr); // 释放泄漏的内存
-    pu_tracker.free_func(current);      // 释放节点本身
-    current = next;
+  while (node != NULL) {
+    next = node->next;
+    PU_LOG_DEBUG("pu_mem_tracker WARNING: Memory leak - %p, %zu bytes at %s:%d\n", node->ptr, node->size, node->file, node->line);
+    leak_size += node->size;
+    pu_tracker.free_func(node->ptr); // 释放泄漏的内存
+    pu_tracker.free_func(node);      // 释放节点本身
+    node = next;
     leak_count++;
   }
 
