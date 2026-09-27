@@ -66,6 +66,60 @@ static inline double pu_port_pow(double base, double exp) {
   return neg ? (1.0 / result) : result;
 }
 
+/* ---- labs 降级：内核无 <stdlib.h>，无 labs ---- */
+static inline long pu_port_labs(long x) { return (x < 0) ? -x : x; }
+#define labs(x) pu_port_labs((long)(x))
+
+/* ---- asin 降级：内核无 <math.h>，无 asin/sin/cos ----
+ * 用途: rn8209 有功相位校正 radian = asin(sin_value)，sin_value 为
+ *       功率误差推得的小量（典型 |x| < 0.1），对精度要求不高。
+ * 实现: 泰勒级数 sin（先归约到 [-PI, PI]，18 项达双精度极限）
+ *       + 牛顿迭代解 sin(y) = x（二次收敛，约 5 次迭代达 1e-12）。
+ * 注意: 仅做标量计算，不访问 FP 系统寄存器以外状态；
+ *       调用处须位于 PU_FP_BEGIN()/PU_FP_END() 保护区内的前提不变。
+ */
+#define PU_PORT_PI      3.14159265358979323846
+#define PU_PORT_HALF_PI 1.57079632679489661923
+static inline double pu_port_sin(double x) {
+  const double two_pi = 2.0 * PU_PORT_PI;
+  while (x > PU_PORT_PI) {
+    x -= two_pi;
+  }
+  while (x < -PU_PORT_PI) {
+    x += two_pi;
+  }
+  double term = x;
+  double sum = x;
+  for (int i = 1; i <= 18; i++) {
+    term *= -(x * x) / ((2.0 * i) * (2.0 * i + 1.0));
+    sum += term;
+  }
+  return sum;
+}
+static inline double pu_port_cos(double x) { return pu_port_sin(x + PU_PORT_HALF_PI); }
+static inline double pu_port_asin(double x) {
+  if (x >= 1.0) {
+    return PU_PORT_HALF_PI;
+  }
+  if (x <= -1.0) {
+    return -PU_PORT_HALF_PI;
+  }
+  double y = x; /* 初值 x, |x| < 1 时牛顿法收敛于 [-PI/2, PI/2] */
+  for (int i = 0; i < 24; i++) {
+    double c = pu_port_cos(y);
+    if (c < 1e-10 && c > -1e-10) {
+      break; /* y 已逼近 ±PI/2, 导数趋零即视为收敛 */
+    }
+    double d = (pu_port_sin(y) - x) / c;
+    y -= d;
+    if (d < 1e-12 && d > -1e-12) {
+      break;
+    }
+  }
+  return y;
+}
+#define asin(x) pu_port_asin((double)(x))
+
 /* ---- 浮点保护：内核使用 FP 寄存器前必须保存/恢复用户态 FP 状态 ----
  * 用法（三步，PU_FP_STATE 声明的缓冲区供 BEGIN 保存 / END 恢复复用）:
  *   void my_func(void) {

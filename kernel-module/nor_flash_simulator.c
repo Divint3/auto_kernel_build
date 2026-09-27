@@ -57,11 +57,11 @@ static long fs_fsize(struct file *filp) {
 
 // ==================== 工具函数 ====================
 static uint32_t addr_to_sector(uint32_t addr) {
-  return addr / SECTOR_SIZE;
+  return addr / NOR_SECTOR_SIZE;
 }
 
 static uint32_t sector_to_addr(uint32_t sector) {
-  return sector * SECTOR_SIZE;
+  return sector * NOR_SECTOR_SIZE;
 }
 
 static int is_addr_valid(uint32_t addr) {
@@ -184,7 +184,7 @@ flash_status_t flash_erase_sector(nor_flash_t *flash, uint32_t sector_addr) {
 
   // 执行擦除操作（设置为全0xFF）
   uint32_t start_addr = sector_to_addr(sector);
-  memset(&flash->data[start_addr], 0xFF, SECTOR_SIZE);
+  memset(&flash->data[start_addr], 0xFF, NOR_SECTOR_SIZE);
 
   // 更新擦除计数
   flash->erase_count[sector]++;
@@ -497,7 +497,7 @@ void flash_dump_sector(nor_flash_t *flash, uint32_t sector, uint32_t bytes_to_du
     return;
 
   uint32_t start_addr = sector_to_addr(sector);
-  bytes_to_dump = (bytes_to_dump > SECTOR_SIZE) ? SECTOR_SIZE : bytes_to_dump;
+  bytes_to_dump = (bytes_to_dump > NOR_SECTOR_SIZE) ? NOR_SECTOR_SIZE : bytes_to_dump;
 
   FS_LOG("Sector %u (0x%08X-0x%08X)\n", sector, start_addr, start_addr + bytes_to_dump - 1);
   FS_LOG("Erase Count: %u, Bad Block: %s\n", flash->erase_count[sector],

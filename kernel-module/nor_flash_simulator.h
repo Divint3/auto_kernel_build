@@ -13,9 +13,10 @@
 #include "pu_port.h"
 
 // ==================== 配置区域 ====================
+// 注意: 内核已定义 PAGE_SIZE(asm/page.h), 仿真器宏必须加 NOR_ 前缀避免重定义
 #define FLASH_SIZE      (1024 * 1024) // 1MB Flash
-#define SECTOR_SIZE     (4 * 1024)    // 4KB 扇区大小
-#define PAGE_SIZE       256           // 256字节 页大小
+#define NOR_SECTOR_SIZE (4 * 1024)    // 4KB 扇区大小
+#define NOR_PAGE_SIZE   256           // 256字节 页大小
 #define MAX_ERASE_COUNT 100000        // 最大擦除次数
 
 // 默认文件名
@@ -23,7 +24,7 @@
 #define DEFAULT_META_FILE "flash_meta.bin"
 
 // 计算扇区数量
-#define SECTOR_COUNT (FLASH_SIZE / SECTOR_SIZE)
+#define SECTOR_COUNT (FLASH_SIZE / NOR_SECTOR_SIZE)
 
 // Flash状态码
 typedef enum {

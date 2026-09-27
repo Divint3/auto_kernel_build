@@ -53,10 +53,10 @@ static int flash_read_cb(uint32_t address, uint8_t *data, uint16_t size) {
 static int flash_write_cb(uint32_t address, uint8_t *data, uint16_t size) {
   if (meter_flash == NULL)
     return -1;
-  /* 仿真器限制单次写不得跨扇区, 按 PAGE_SIZE 对齐边界拆分 */
+  /* 仿真器限制单次写不得跨扇区, 按 NOR_PAGE_SIZE 对齐边界拆分 */
   uint32_t off = 0;
   while (off < (uint32_t)size) {
-    uint32_t chunk = PAGE_SIZE - ((address + off) % PAGE_SIZE);
+    uint32_t chunk = NOR_PAGE_SIZE - ((address + off) % NOR_PAGE_SIZE);
     if (chunk > (uint32_t)(size - off))
       chunk = size - off;
     if (flash_write_page(meter_flash, address + off, data + off, chunk) != FLASH_OK)
@@ -144,8 +144,8 @@ static void rn8209_smoke_test(void) {
   rn8209_inst.data_crc_callback  = kernel_crc_cb;
   rn8209_inst.io_callback        = meter_uart_io();
   /* NOR Flash 仿真器 -> 脉冲数据持久化(掉电保存), flash 回调在 hello_init 中注入 */
-  rn8209_inst.flash_desc.page_size    = PAGE_SIZE;
-  rn8209_inst.flash_desc.sector_size  = SECTOR_SIZE;
+  rn8209_inst.flash_desc.page_size    = NOR_PAGE_SIZE;
+  rn8209_inst.flash_desc.sector_size  = NOR_SECTOR_SIZE;
   rn8209_inst.flash_desc.sector_count = SECTOR_COUNT;
   rn8209_inst.flash_desc.start_address = 0;
   rn8209_inst.flash_desc.end_address   = FLASH_SIZE - 1;

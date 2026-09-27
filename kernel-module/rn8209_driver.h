@@ -2,6 +2,7 @@
 #define RN8209_DRIVER_H_
 
 #include "meter_chip_port_driver.h"
+#include "pu_compiler.h"
 #include "pu_doublecheck_bitmap.h"
 #include "pu_port.h" // 平台可移植层（__KERNEL__ 区分内核/用户态）
 #include "pu_type.h"
@@ -298,6 +299,7 @@ typedef struct {
 
 ////< 内部工具函数,不向外暴露
 bool rn8209_init(rn8209_instance_p instance, rn8209_preset_p preset); ///< 寄存器初始化
+PU_COMPILER_WEAK bool meter_chip_exec_reboot(rn8209_instance_p instance); ///< 复位命令(弱符号,可被具体平台覆盖)
 uint8_t rn8209_checksum(uint8_t *data, uint8_t length);               ///< 校验和函数
 bool rn8209_check_reboot(rn8209_instance_p instance);
 uint8_t rn8209_get_reg_length_by_name(uint8_t name);
@@ -319,6 +321,23 @@ bool rn8209_load_pulse_cnt(rn8209_instance_p instance); ///< 开机载入脉冲�
 bool rn8209_save_pulse_cnt(rn8209_instance_p instance); ///< 保存脉冲计数
 ///< 计算函数
 bool rn8209_calc_cycle(rn8209_instance_p instance, size_t index);
+bool rn8209_calc_current(rn8209_instance_p instance);
+bool rn8209_calc_voltage(rn8209_instance_p instance);
+bool rn8209_calc_frequency(rn8209_instance_p instance);
+bool rn8209_calc_active_power(rn8209_instance_p instance);
+bool rn8209_calc_reactive_power(rn8209_instance_p instance);
+bool rn8209_calc_apparent_power(rn8209_instance_p instance);
+bool rn8209_calc_power_factor(rn8209_instance_p instance);
+bool rn8209_calc_active_energy(rn8209_instance_p instance);
+bool rn8209_calc_reactive_energy(rn8209_instance_p instance);
+bool rn8209_calc_total_active_energy(rn8209_instance_p instance);
+bool rn8209_calc_total_reactive_energy(rn8209_instance_p instance);
+bool rn8209_calc_combined_active_energy(rn8209_instance_p instance);
+bool rn8209_calc_combined_reactive_energy_1(rn8209_instance_p instance);
+bool rn8209_calc_combined_reactive_energy_2(rn8209_instance_p instance);
+bool rn8209_update_quadrant(rn8209_instance_p instance);
+bool rn8209_update_tariff(rn8209_instance_p instance);
+bool rn8209_read_reg(rn8209_instance_p instance);
 
 ///< 检查函数
 
@@ -388,6 +407,7 @@ bool rn8209_get_phase_a_active_power_bcd(void *instance, uint8_t *value, uint8_t
 bool rn8209_get_phase_a_reactive_power_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
 bool rn8209_get_phase_a_apparent_power_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
 bool rn8209_get_phase_a_power_factor_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
+bool rn8209_get_phase_a_active_energy_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
 bool rn8209_get_phase_a_forward_active_energy_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
 bool rn8209_get_phase_a_forward_reactive_energy_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);
 bool rn8209_get_phase_a_reverse_active_energy_bcd(void *instance, uint8_t *value, uint8_t size, int conversion);

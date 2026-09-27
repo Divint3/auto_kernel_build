@@ -312,6 +312,7 @@ const char *pu_get_level_str(pu_log_level_e level);
  * @param ...  可变参数
  */
 void pu_log_printf(pu_log_level_e level, const char *file, int line, const char *fmt, ...);
+void pu_log_hex(pu_log_level_e level, const char *file, int line, const void *data, size_t len, const char *desc);
 
 void pu_stash_thread_info(uint32_t *exception_stack_ptr);
 

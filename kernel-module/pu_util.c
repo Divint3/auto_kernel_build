@@ -818,7 +818,7 @@ void pu_log_hex(pu_log_level_e level, const char *file, int line, const void *da
 void pu_set_log_level(pu_log_level_e level) {
   g_log_level = level;
 }
-pu_log_level_e pu_get_log_level() {
+pu_log_level_e pu_get_log_level(void) {
   return g_log_level;
 }
 

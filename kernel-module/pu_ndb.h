@@ -64,5 +64,6 @@ typedef struct {
 bool pu_ndb_load_data(pu_ndb_p ndb, uint8_t *data, uint32_t data_size);
 bool pu_ndb_save_data(pu_ndb_p ndb, uint8_t *data, uint32_t data_size);
 pu_ndb_error_code_e pu_ndb_get_last_x_data(pu_ndb_p ndb, uint32_t x, uint8_t *data, uint32_t data_size);
+uint32_t pu_ndb_get_total_serial(pu_ndb_p ndb);
 
 #endif // PU_NDB_H_
