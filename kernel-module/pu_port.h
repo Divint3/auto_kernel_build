@@ -70,6 +70,16 @@ static inline double pu_port_pow(double base, double exp) {
 static inline long pu_port_labs(long x) { return (x < 0) ? -x : x; }
 #define labs(x) pu_port_labs((long)(x))
 
+/* ---- strncpy 映射：新版内核已从 string API 移除 strncpy（fortify 清理），----
+ * 用 strscpy 替代：同为最多拷贝 n 字节，且保证 NUL 结尾（strncpy 不保证），
+ * 对路径缓冲区等字符串场景语义更安全；仅尾部零填充行为有差异，本库无依赖。
+ */
+#define strncpy(dst, src, n) strscpy(dst, src, n)
+
+/* strcpy 同样处于移除名单：映射为 strscpy(dst, src, strlen(src)+1)，
+ * 与原语义严格等价（完整拷贝含 NUL），杜绝 dst 越界 */
+#define strcpy(dst, src) strscpy(dst, src, strlen(src) + 1)
+
 /* ---- asin 降级：内核无 <math.h>，无 asin/sin/cos ----
  * 用途: rn8209 有功相位校正 radian = asin(sin_value)，sin_value 为
  *       功率误差推得的小量（典型 |x| < 0.1），对精度要求不高。
