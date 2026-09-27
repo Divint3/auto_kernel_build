@@ -1025,7 +1025,7 @@ bool rn8209_write_register_by_address(rn8209_instance_p instance, uint8_t addres
 }
 
 bool rn8209_read_register_by_name(rn8209_instance_p instance, rn8209_register_name_e name, uext32_t *buffer) {
-  uint8_t address;
+  uint8_t address = 0xFF; // 0xFF: 无效哨兵（RN8209 寄存器地址均在 0x7F 以内）
   for (size_t i = 0; i < PU_GET_COUNT(register_list_init); i++) {
 #ifdef RN8209_SIMULATE
     if (register_list_running[i].name == name) {
@@ -1039,11 +1039,15 @@ bool rn8209_read_register_by_name(rn8209_instance_p instance, rn8209_register_na
     }
 #endif
   }
+  if (address == 0xFF) { // 查表失败: 避免使用未初始化地址
+    PU_LOG_ERROR("8209 register name is invalid: %d", name);
+    return false;
+  }
   return rn8209_read_register_by_address(instance, address, buffer);
 }
 
 bool rn8209_write_register_by_name(rn8209_instance_p instance, rn8209_register_name_e name, uext32_t *buffer) {
-  uint8_t address;
+  uint8_t address = 0xFF; // 0xFF: 无效哨兵（RN8209 寄存器地址均在 0x7F 以内）
   for (size_t i = 0; i < PU_GET_COUNT(register_list_init); i++) {
 #ifdef RN8209_SIMULATE
     if (register_list_running[i].name == name) {
@@ -1056,6 +1060,10 @@ bool rn8209_write_register_by_name(rn8209_instance_p instance, rn8209_register_n
       break;
     }
 #endif
+  }
+  if (address == 0xFF) { // 查表失败: 避免使用未初始化地址
+    PU_LOG_ERROR("8209 register name is invalid: %d", name);
+    return false;
   }
   return rn8209_write_register_by_address(instance, address, buffer);
 }
@@ -1285,6 +1293,8 @@ void rn8209_print_register_by_name(rn8209_register_name_e name) {
   uint8_t log_buffer[100];
 #ifdef RN8209_COMMENT
   sprintf((char *)log_buffer, "regisitor: %s\tlength: %d\tvalue: 0x", reg_config->comment, reg_config->size);
+#else
+  PU_UNUSED(log_buffer); // 未启用 RN8209_COMMENT 时消除 -Wunused-variable
 #endif /* #ifdef RN8209_COMMENT */
 
   for (size_t i = 0; i < reg_length; i++) {
@@ -2154,6 +2164,8 @@ bool rn8209_calibration_one_phase_reactive_power_phase(void *instance, uint8_t p
   float offical_error_rate;
   float active_power_calc;
   float reactive_power_calc;
+  PU_UNUSED(active_power_ref);   // 调试用参考值, 消除 -Wunused-variable
+  PU_UNUSED(active_power_calc);  // 消除 -Wunused-but-set-variable
   uint8_t reactive_phase_val;
   uext32_t clear_qphscal_reg = {0};
 
@@ -3300,7 +3312,7 @@ bool rn8209_get_tagged_words_bcd(void *instance, uint8_t *value, uint8_t which_w
   if (rn8209_instance->status != METER_CHIP_STATUS_MEASURING && rn8209_instance->status != METER_CHIP_STATUS_CALIBRATING) {
     return false;
   }
-  uint8_t word;
+  uint8_t word = 0;
   switch (which_word) {
   case 1: {
     memcpy(&word, &rn8209_instance->tagged_words.combined_active_tagged_word.byte, sizeof(uint8_t));
@@ -3311,6 +3323,9 @@ bool rn8209_get_tagged_words_bcd(void *instance, uint8_t *value, uint8_t which_w
   case 3: {
     memcpy(&word, &rn8209_instance->tagged_words.combined_reactive_tagged_word[1].byte, sizeof(uint8_t));
   } break;
+  default: // 非法 which_word: 避免使用未初始化变量
+    PU_LOG_ERROR("8209 which_word is invalid: %d", which_word);
+    return false;
   }
   return pu_convert_to_bcd(word, value, size);
 }

@@ -22,6 +22,7 @@ obj-m += hello.o
 hello-objs := hello_main.o \
               meter_uart.o \
               rn8209_driver.o \
+              nor_flash_simulator.o \
               pu_bitmap.o \
               pu_doublecheck_bitmap.o \
               pu_mem_pool.o \
@@ -61,7 +62,8 @@ LIB_OBJS := pu_bitmap.o \
             pu_ndb.o \
             pu_queue.o \
             pu_ringbuffer.o \
-            pu_util.o
+            pu_util.o \
+            nor_flash_simulator.o
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

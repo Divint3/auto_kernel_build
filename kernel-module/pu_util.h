@@ -318,7 +318,7 @@ void pu_stash_thread_info(uint32_t *exception_stack_ptr);
 // 设置全局日志级别（动态过滤）
 
 void pu_set_log_level(pu_log_level_e level);
-pu_log_level_e pu_get_log_level();
+pu_log_level_e pu_get_log_level(void);
 
 #ifdef __ICCARM__
 #define PU_BACKTRACE_SAVECONTEXT()                           \

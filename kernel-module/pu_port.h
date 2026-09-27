@@ -67,19 +67,32 @@ static inline double pu_port_pow(double base, double exp) {
 }
 
 /* ---- 浮点保护：内核使用 FP 寄存器前必须保存/恢复用户态 FP 状态 ----
- * 用法: 包住所有会执行浮点运算的代码段（如 rn8209 驱动的浮点 API 调用）。
+ * 用法（三步，PU_FP_STATE 声明的缓冲区供 BEGIN 保存 / END 恢复复用）:
+ *   void my_func(void) {
+ *     PU_FP_STATE();      // 声明 FP 状态保存缓冲区（栈上局部变量）
+ *     PU_FP_BEGIN();
+ *     ...浮点运算代码...
+ *     PU_FP_END();
+ *   }
  * 注意: GUARD 区间内会关闭抢占（kernel_neon_begin/kernel_fpu_begin），
  *       区间内禁止任何可能睡眠的操作（msleep/GFP_KERNEL 分配/阻塞 IO）。
+ * 内核 7.2+ 的 arm64 上 kernel_neon_begin/end 签名为
+ *   void kernel_neon_begin(struct user_fpsimd_state *);
+ *   void kernel_neon_end(struct user_fpsimd_state *);
+ * 需要调用方提供保存缓冲区，因此 PU_FP_STATE() 必须与 BEGIN/END 成对出现在同一函数内。
  */
 #if defined(CONFIG_ARM64) || defined(CONFIG_ARM)
 #include <asm/neon.h>
-#define PU_FP_BEGIN() kernel_neon_begin()
-#define PU_FP_END()   kernel_neon_end()
+#define PU_FP_STATE() struct user_fpsimd_state pu_fp_state
+#define PU_FP_BEGIN() kernel_neon_begin(&pu_fp_state)
+#define PU_FP_END()   kernel_neon_end(&pu_fp_state)
 #elif defined(CONFIG_X86) || defined(CONFIG_X86_64)
 #include <asm/fpu/api.h>
+#define PU_FP_STATE()
 #define PU_FP_BEGIN() kernel_fpu_begin()
 #define PU_FP_END()   kernel_fpu_end()
 #else
+#define PU_FP_STATE()
 #define PU_FP_BEGIN()
 #define PU_FP_END()
 #endif

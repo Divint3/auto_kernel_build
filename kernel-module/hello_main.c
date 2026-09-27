@@ -14,6 +14,7 @@
 #include "pu_queue.h"
 #include "pu_ringbuffer.h"
 #include "rn8209_driver.h"
+#include "nor_flash_simulator.h"
 
 #ifdef __KERNEL__
 
@@ -27,6 +28,74 @@
 static char *uart_dev = "/dev/ttyAMA1";
 module_param(uart_dev, charp, 0444);
 MODULE_PARM_DESC(uart_dev, "rn8209 计量芯片所接的串口设备 (默认 /dev/ttyAMA1)");
+
+/* NOR Flash 仿真器持久化文件（相对路径基于模块加载时的进程 cwd，QEMU 里即 /） */
+static char *flash_data_file = "flash_data.bin";
+static char *flash_meta_file = "flash_meta.bin";
+module_param(flash_data_file, charp, 0444);
+module_param(flash_meta_file, charp, 0444);
+MODULE_PARM_DESC(flash_data_file, "NOR Flash 仿真数据文件 (默认 flash_data.bin)");
+MODULE_PARM_DESC(flash_meta_file, "NOR Flash 仿真元数据文件 (默认 flash_meta.bin)");
+
+static nor_flash_t *meter_flash = NULL;
+
+/* ---- NOR Flash 仿真器 -> rn8209 flash_callback 适配 ----
+ * 注意: 内核态下仿真器的文件读写(flash_save_all)可能睡眠,
+ *       因此 flash 回调不能在 PU_FP_BEGIN/END 保护区内的调用路径触发;
+ *       rn8209 的脉冲持久化(rn8209_save_pulse_cnt 等)应在普通进程上下文调用。 */
+
+static int flash_read_cb(uint32_t address, uint8_t *data, uint16_t size) {
+  if (meter_flash == NULL)
+    return -1;
+  return (flash_read(meter_flash, address, data, size) == FLASH_OK) ? 0 : -1;
+}
+
+static int flash_write_cb(uint32_t address, uint8_t *data, uint16_t size) {
+  if (meter_flash == NULL)
+    return -1;
+  /* 仿真器限制单次写不得跨扇区, 按 PAGE_SIZE 对齐边界拆分 */
+  uint32_t off = 0;
+  while (off < (uint32_t)size) {
+    uint32_t chunk = PAGE_SIZE - ((address + off) % PAGE_SIZE);
+    if (chunk > (uint32_t)(size - off))
+      chunk = size - off;
+    if (flash_write_page(meter_flash, address + off, data + off, chunk) != FLASH_OK)
+      return -1;
+    off += chunk;
+  }
+  return 0;
+}
+
+static int flash_erase_cb(uint32_t address) {
+  if (meter_flash == NULL)
+    return -1;
+  return (flash_erase_sector(meter_flash, address) == FLASH_OK) ? 0 : -1;
+}
+
+/* NOR Flash 仿真器写读回环自测 */
+static void flash_smoke_test(void) {
+  uint8_t wbuf[16];
+  uint8_t rbuf[16] = {0};
+  const uint32_t test_addr = 0;
+
+  memcpy(wbuf, "RN8209-FLASH-OK", sizeof("RN8209-FLASH-OK"));
+
+  if (flash_erase_cb(test_addr) != 0) {
+    pr_warn("hello: nor flash erase failed\n");
+    return;
+  }
+  if (flash_write_cb(test_addr, wbuf, sizeof(wbuf)) != 0) {
+    pr_warn("hello: nor flash write failed\n");
+    return;
+  }
+  if (flash_read(meter_flash, test_addr, rbuf, sizeof(rbuf)) != FLASH_OK ||
+      memcmp(wbuf, rbuf, sizeof(wbuf)) != 0) {
+    pr_warn("hello: nor flash verify FAILED\n");
+    return;
+  }
+  pr_info("hello: nor flash roundtrip OK: %s\n", rbuf);
+  flash_save_all(meter_flash); // 立即持久化, 验证文件落盘链路
+}
 
 /* 驱动实例较大（脉冲块 256B + 多费率数据），放静态存储区 */
 static rn8209_instance_t rn8209_inst;
@@ -74,8 +143,17 @@ static void rn8209_smoke_test(void) {
   rn8209_inst.sleep              = kernel_sleep_cb;
   rn8209_inst.data_crc_callback  = kernel_crc_cb;
   rn8209_inst.io_callback        = meter_uart_io();
-  /* flash_callback/flash_desc 暂缺: 脉冲数据持久化(掉电保存)待接 flash 驱动后注入 */
+  /* NOR Flash 仿真器 -> 脉冲数据持久化(掉电保存), flash 回调在 hello_init 中注入 */
+  rn8209_inst.flash_desc.page_size    = PAGE_SIZE;
+  rn8209_inst.flash_desc.sector_size  = SECTOR_SIZE;
+  rn8209_inst.flash_desc.sector_count = SECTOR_COUNT;
+  rn8209_inst.flash_desc.start_address = 0;
+  rn8209_inst.flash_desc.end_address   = FLASH_SIZE - 1;
+  rn8209_inst.flash_callback.read  = flash_read_cb;
+  rn8209_inst.flash_callback.write = flash_write_cb;
+  rn8209_inst.flash_callback.erase = flash_erase_cb;
 
+  PU_FP_STATE(); // FP 状态保存缓冲区（arm64 内核 7.2+ kernel_neon_begin 需要调用方提供）
   PU_FP_BEGIN();
   ok = rn8209_init(&rn8209_inst, &preset);
   if (ok) {
@@ -126,6 +204,15 @@ static int __init hello_init(void) {
   pr_info("hello: mem peak=%zu current=%zu bytes\n",
           pu_mem_get_peak_usage(), pu_mem_get_current_usage());
 
+  /* NOR Flash 仿真器（文件持久化）。此后 rn8209_inst.flash_callback 可用,
+   * 可在业务代码中调用 rn8209_load_pulse_cnt/rn8209_save_pulse_cnt 做掉电保存 */
+  meter_flash = flash_init(flash_data_file, flash_meta_file);
+  if (meter_flash != NULL) {
+    flash_smoke_test();
+  } else {
+    pr_warn("hello: nor flash init failed, pulse persistence disabled\n");
+  }
+
   /* 打开串口并跑 rn8209 冒烟测试。
    * 打开失败（如 QEMU virt 默认只有 ttyAMA0）只告警，不影响模块加载。 */
   int ret = meter_uart_open(uart_dev);
@@ -138,6 +225,10 @@ static int __init hello_init(void) {
 }
 
 static void __exit hello_exit(void) {
+  if (meter_flash != NULL) {
+    flash_deinit(meter_flash); // 自动 save_all 后释放
+    meter_flash = NULL;
+  }
   meter_uart_close();
   pr_info("hello: module unloaded\n");
 }
