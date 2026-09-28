@@ -139,7 +139,15 @@ static void rn8209_smoke_test(void) {
   /* TODO: 按芯片手册/原理图填写 SYSCON/EMUCON/... 预设寄存器与 uv/ui 转换系数 */
   preset.uv = 1.0f;
   preset.ui = 1.0f;
+  preset.SYSCON.byte[0] = 0x16;
+  preset.SYSCON.byte[1] = 0x03;
 
+  preset.EMUCON.byte[0] = 0x80;
+  preset.EMUCON.byte[1] = 0x03;
+
+  preset.EMUCON2.byte[0] = 0x01;
+  preset.EMUCON2.byte[1] = 0x80;
+  
   rn8209_inst.sleep              = kernel_sleep_cb;
   rn8209_inst.data_crc_callback  = kernel_crc_cb;
   rn8209_inst.io_callback        = meter_uart_io();
@@ -155,10 +163,11 @@ static void rn8209_smoke_test(void) {
 
   PU_FP_STATE(); // FP 状态保存缓冲区（arm64 内核 7.2+ kernel_neon_begin 需要调用方提供）
   PU_FP_BEGIN();
-  ok = rn8209_init(&rn8209_inst, &preset);
-  if (ok) {
-    ok = rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_DeviceID, &device_id);
-  }
+  rn8209_init(&rn8209_inst, &preset);
+  rn8209_inst.status = METER_CHIP_STATUS_MEASURING;
+
+  ok = rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_DeviceID, &device_id);
+  
   PU_FP_END();
 
   if (ok) {
