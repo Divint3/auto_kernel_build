@@ -180,41 +180,6 @@ static void rn8209_smoke_test(void) {
 static int __init hello_init(void) {
   pr_info("hello: module loaded (built against running kernel)\n");
 
-  /* pu 库冒烟自测：bitmap / queue / ringbuffer / mem tracker */
-  pu_bitmap_p bm = pu_bitmap_create(64);
-  if (bm != NULL) {
-    pu_bitmap_set_bit(bm, 3);
-    pu_bitmap_set_bit(bm, 63);
-    pr_info("hello: bitmap bit3=%d bit63=%d set_count=%zu\n",
-            pu_bitmap_test_bit(bm, 3) ? 1 : 0,
-            pu_bitmap_test_bit(bm, 63) ? 1 : 0,
-            pu_bitmap_count_set(bm));
-    pu_bitmap_destroy(bm);
-  }
-
-  pu_queue_p q = pu_queue_create(4);
-  if (q != NULL) {
-    static int item = 42;
-    pu_queue_enqueue(q, &item);
-    int *out = (int *)pu_queue_dequeue(q);
-    pr_info("hello: queue dequeue=%d\n", out ? *out : -1);
-    pu_queue_destroy(q);
-  }
-
-  pu_ringbuffer_p rb = pu_ringbuffer_create_dynamic(16);
-  if (rb != NULL) {
-    pu_ringbuffer_enqueue_byte(rb, 0xAA);
-    uint8_t byte = 0;
-    pu_ringbuffer_dequeue_byte(rb, &byte);
-    pr_info("hello: ringbuffer roundtrip=0x%02X\n", byte);
-    pu_ringbuffer_destroy(rb);
-  }
-
-  pr_info("hello: mem peak=%zu current=%zu bytes\n",
-          pu_mem_get_peak_usage(), pu_mem_get_current_usage());
-
-  /* NOR Flash 仿真器（文件持久化）。此后 rn8209_inst.flash_callback 可用,
-   * 可在业务代码中调用 rn8209_load_pulse_cnt/rn8209_save_pulse_cnt 做掉电保存 */
   meter_flash = flash_init(flash_data_file, flash_meta_file);
   if (meter_flash != NULL) {
     flash_smoke_test();
@@ -222,8 +187,6 @@ static int __init hello_init(void) {
     pr_warn("hello: nor flash init failed, pulse persistence disabled\n");
   }
 
-  /* 打开串口并跑 rn8209 冒烟测试。
-   * 打开失败（如 QEMU virt 默认只有 ttyAMA0）只告警，不影响模块加载。 */
   int ret = meter_uart_open(uart_dev);
   if (ret == 0) {
     rn8209_smoke_test();

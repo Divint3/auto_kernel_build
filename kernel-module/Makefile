@@ -32,6 +32,23 @@ hello-objs := hello_main.o \
               pu_ringbuffer.o \
               pu_util.o
 
+obj-m += rn8209_test.o
+
+rn8209_test-objs := rn8209_sample.o \
+              meter_uart.o \
+              rn8209_driver.o \
+              nor_flash_simulator.o \
+              pu_bitmap.o \
+              pu_doublecheck_bitmap.o \
+              pu_mem_pool.o \
+              pu_mem_tracker.o \
+              pu_ndb.o \
+              pu_queue.o \
+              pu_ringbuffer.o \
+              pu_util.o
+
+
+
 # rn8209_driver.c 含 float 运算（pow/fabs 已由 pu_port.h 提供内核降级实现）。
 # arm64 内核全局使用 -mgeneral-regs-only 禁用浮点指令，单独对本文件放开；
 # 代价: 调用其浮点 API 前必须用 PU_FP_BEGIN()/PU_FP_END() 包住
@@ -74,7 +91,7 @@ hello_test: hello_main.c $(LIB_OBJS) rn8209_driver.o
 	$(CC) $(CFLAGS) hello_main.c $(LIB_OBJS) rn8209_driver.o $(LDLIBS) -o $@
 
 clean:
-	rm -f *.o hello_test
+	rm -f *.o hello_test rn8209_test.ko
 
 .PHONY: help test clean
 
