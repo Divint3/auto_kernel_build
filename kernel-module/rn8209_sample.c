@@ -146,7 +146,7 @@ static ssize_t echo_rn8209_device(struct device *dev,
   if (sysfs_streq(buf, "voltage")) {
     status = RN8209_DEVICE_STATUS_VOLTAGE;
 
-    if (rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_URMS,
+    if (!rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_URMS,
                                      &register_data)) {
       scnprintf(rn8209_device_buff, sizeof(rn8209_device_buff), "ERR");
     } else {
@@ -156,7 +156,7 @@ static ssize_t echo_rn8209_device(struct device *dev,
 
   } else if (sysfs_streq(buf, "current")) {
     status = RN8209_DEVICE_STATUS_CURRENT;
-    if (rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_IARMS,
+    if (!rn8209_read_register_by_name(&rn8209_inst, RN8209_REG_IARMS,
                                      &register_data)) {
       scnprintf(rn8209_device_buff, sizeof(rn8209_device_buff), "ERR");
     } else {
