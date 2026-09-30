@@ -13,7 +13,8 @@
 #include "rn8209_driver.h"
 static nor_flash_t *meter_flash = NULL;
 
-static char *uart_dev = "/dev/ttyAMA1";
+// static char *uart_dev = "/dev/ttyAMA1";
+static char *uart_dev = "/dev/ttyS3";
 module_param(uart_dev, charp, 0444);
 MODULE_PARM_DESC(uart_dev, "rn8209 计量芯片所接的串口设备 (默认 /dev/ttyAMA1)");
 /* NOR Flash 仿真器持久化文件（相对路径基于模块加载时的进程 cwd，QEMU 里即 /）
